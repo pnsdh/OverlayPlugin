@@ -203,7 +203,8 @@ namespace RainbowMage.OverlayPlugin
 
         private string GetCefPath()
         {
-            return Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "OverlayPluginCef", Environment.Is64BitProcess ? "x64" : "x86");
+            // Fork: must match Renderer.CefFolderName.
+            return Path.Combine(ActGlobals.oFormActMain.AppDataFolder.FullName, "OverlayPluginCef-cbkr", Environment.Is64BitProcess ? "x64" : "x86");
         }
 
         protected virtual void Dispose(bool disposing)

@@ -14,8 +14,9 @@ namespace RainbowMage.OverlayPlugin.Updater
     public class CefInstaller
     {
 
-        const string CEF_DL = "https://github.com/ngld/OverlayPlugin/releases/download/v0.7.0/CefSharp-{CEF_VERSION}-{ARCH}.7z";
-        const string CEF_VERSION = "95.7.14";
+        // Fork: CEF bundles (built by build-cef-redists.ps1) are released on the fork's CEF repo.
+        const string CEF_DL = "https://github.com/pnsdh/OverlayPlugin-CEF/releases/download/v{CEF_VERSION}/CefSharp-{CEF_VERSION}-{ARCH}.7z";
+        const string CEF_VERSION = "152.0.10";
 
         public static string GetUrl()
         {
@@ -71,7 +72,7 @@ namespace RainbowMage.OverlayPlugin.Updater
             }
 
             var manifest = Path.Combine(cefPath, "version.txt");
-            var importantFiles = new List<string>() { "CefSharp.dll", "CefSharp.Core.dll", "CefSharp.OffScreen.dll", "CefSharp.BrowserSubprocess.exe", "CefSharp.BrowserSubprocess.Core.dll", "libcef.dll", "libEGL.dll", "libGLESv2.dll" };
+            var importantFiles = new List<string>() { "CefSharp.dll", "CefSharp.Core.dll", "CefSharp.OffScreen.dll", "CefSharp.BrowserSubprocess.exe", "CefSharp.BrowserSubprocess.Core.dll", "CefSharp.Core.Runtime.dll", "libcef.dll", "chrome_elf.dll", "icudtl.dat", "resources.pak" };
 
             if (File.Exists(manifest))
             {

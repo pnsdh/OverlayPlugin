@@ -1,63 +1,71 @@
-try {
-    # This assumes Visual Studio 2019 is installed in C:. You might have to change this depending on your system.
-    $VS_PATH = "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community"
+# Packs the CEF bundle that CefInstaller downloads (out\CefSharp-<CEF version>-x64.7z) from the
+# NuGet packages referenced by HtmlRenderer.csproj: CEF runtime, locales, CefSharp and its
+# browser subprocess.  Release it on the fork's CEF repo under tag v<CEF version>, e.g.
+#   gh release create v152.0.10 out\CefSharp-152.0.10-x64.7z -R pnsdh/OverlayPlugin-CEF
+# and set CEF_VERSION in OverlayPlugin.Updater\CefInstaller.cs to the same version.
+$ErrorActionPreference = "Stop"
 
-    if ( -not (Test-Path "Thirdparty\ACT\Advanced Combat Tracker.exe" )) {
-        echo 'Error: Please run tools\fetch_deps.ps1'
-        exit 1
-    }
-
-    if ( -not (Test-Path "Thirdparty\FFXIV_ACT_Plugin\SDK\FFXIV_ACT_Plugin.Common.dll" )) {
-        echo 'Error: Please run tools\fetch_deps.ps1'
-        exit 1
-    }
-
-    $ENV:PATH = "$VS_PATH\MSBuild\Current\Bin;${ENV:PATH}";
-    if (Test-Path "C:\Program Files\7-Zip\7z.exe") {
-        $ENV:PATH = "C:\Program Files\7-Zip;${ENV:PATH}";
-    }
-
-    echo "==> Building..."
-
-    msbuild -p:Configuration=Release -p:Platform=x64 "OverlayPlugin.sln" -t:Restore
-    msbuild -p:Configuration=Release -p:Platform=x64 "OverlayPlugin.sln" -t:Rebuild
-    if (-not $?) { exit 1 }
-
-    echo "==> Building CEF archives..."
-
-    cd out\Release\libs\x64
-    copy ..\CefSharp* .
-
-    $text = [System.IO.File]::ReadAllText("$PWD\README.txt");
-    $regex = [regex]::New("CEF Version:\s*([0-9.]+)");
-    $m = $regex.Match($text);
-
-    if (-not $m) {
-        echo "Error: Version number not found in CEF's README.txt!"
-        exit 1
-    }
-
-    $version = $m.Groups[1]
-    $archive = "..\..\..\CefSharp-$version-x64.7z"
-
-    if (Test-Path $archive) { rm $archive }
-    7z a $archive "-x!*.xml" "-x!*.pdb" .
-
-    # Rename the archive here so I don't have to before uploading.
-    # If you're wondering why I change the extension: People don't read. This seems like the easiest way to force them to.
-    #mv $archive "..\..\..\CefSharp-$version-x64.DO_NOT_DOWNLOAD"
-
-    cd ..\..\libs\x86
-    copy ..\CefSharp* .
-
-    $archive = "..\..\..\CefSharp-$version-x86.7z"
-
-    if (Test-Path $archive) { rm $archive }
-    7z a $archive "-x!*.xml" "-x!*.pdb" .
-
-    #mv $archive "..\..\..\CefSharp-$version-x86.DO_NOT_DOWNLOAD"
-
-    cd ..\..
-} catch {
-    Write-Error $Error[0]
+if (Test-Path "C:\Program Files\7-Zip\7z.exe") {
+    $ENV:PATH = "C:\Program Files\7-Zip;${ENV:PATH}";
 }
+
+$OutDir = Join-Path $PWD out
+
+echo "==> Restoring HtmlRenderer to find the package folders..."
+
+dotnet restore .\HtmlRenderer\HtmlRenderer.csproj
+if (-not $?) { exit 1 }
+dotnet msbuild .\HtmlRenderer\HtmlRenderer.csproj -t:PrintCEFDir -p:Configuration=Release
+if (-not $?) { exit 1 }
+
+function PackagePath($name) {
+    return ([System.IO.File]::ReadAllText("$OutDir\Release\$name.Path.txt")).Trim()
+}
+
+$CefRedist = PackagePath "cef.redist.x64"
+$CefSharpCommon = PackagePath "CefSharp.Common"
+$CefSharpOffScreen = PackagePath "CefSharp.OffScreen"
+
+$Sources = @(
+    (Join-Path $CefRedist "runtimes\win-x64\native"),
+    (Join-Path $CefRedist "CEF\win-x64"),
+    (Join-Path $CefSharpCommon "lib\net462"),
+    (Join-Path $CefSharpCommon "CefSharp\x64"),
+    (Join-Path $CefSharpOffScreen "lib\net462")
+)
+
+$text = [System.IO.File]::ReadAllText("$CefRedist\README.txt");
+$m = [regex]::Match($text, "CEF Version:\s*([0-9]+\.[0-9]+\.[0-9]+)");
+if (-not $m.Success) {
+    echo "Error: Version number not found in CEF's README.txt!"
+    exit 1
+}
+$version = $m.Groups[1].Value
+
+$stage = Join-Path $OutDir "cef-bundle"
+if (Test-Path $stage) { rm -Recurse $stage }
+mkdir $stage | Out-Null
+
+foreach ($dir in $Sources) {
+    echo "  $dir"
+    cp -Recurse "$dir\*" $stage
+}
+Get-ChildItem $stage -Recurse -Include *.pdb, *.xml | Remove-Item
+cp "$CefRedist\README.txt" (Join-Path $stage "README.txt")
+cp "$CefRedist\LICENSE.txt" (Join-Path $stage "LICENSE.txt")
+cp "$CefSharpCommon\LICENSE" (Join-Path $stage "CefSharp LICENSE.txt")
+
+$archive = Join-Path $OutDir "CefSharp-$version-x64.7z"
+if (Test-Path $archive) { rm $archive }
+
+if (-not (Get-Command 7z -ErrorAction SilentlyContinue)) {
+    echo "Error: 7z not found. The bundle is staged in $stage."
+    exit 1
+}
+
+echo "==> Packing $archive..."
+Push-Location $stage
+7z a $archive .
+$packed = $?
+Pop-Location
+if (-not $packed) { exit 1 }
