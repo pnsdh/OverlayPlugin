@@ -91,7 +91,7 @@
             // 
             resources.ApplyResources(this.nudMaxFrameRate, "nudMaxFrameRate");
             this.nudMaxFrameRate.Maximum = new decimal(new int[] {
-            60,
+            240,
             0,
             0,
             0});
