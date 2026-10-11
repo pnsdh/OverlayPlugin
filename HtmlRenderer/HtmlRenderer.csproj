@@ -69,5 +69,8 @@
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
+    <!-- Fork: DirectComposition presenter for shared textures (DCompPresenter.cs). -->
+    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+    <PackageReference Include="SharpDX.DirectComposition" Version="4.2.0" />
   </ItemGroup>
 </Project>

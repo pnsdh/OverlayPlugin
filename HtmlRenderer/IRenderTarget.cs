@@ -25,6 +25,16 @@ namespace RainbowMage.HtmlRenderer
         void SetPopupVisible(bool visible);
     }
 
+    // Fork: a target that can show CEF's shared textures (see Renderer.SharedTextures).
+    public interface IAcceleratedRenderTarget : IRenderTarget
+    {
+        // sharedHandle is only valid during this call.
+        void RenderAcceleratedFrame(PaintElementType type, Rect dirtyRect, IntPtr sharedHandle);
+
+        // The last shown frame, for screenshots.
+        Bitmap CaptureFrame();
+    }
+
     public interface IWinFormsTarget : IRenderTarget
     {
         IntPtr Handle { get; }
