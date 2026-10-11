@@ -84,9 +84,11 @@ jobs:
 
       # build.ps1 (not build.bat, which pauses) builds and packs out/OverlayPlugin-<version>.zip
       # with a top-level OverlayPlugin/ folder, as the updater expects (strippedDirs = 1).
+      # Windows PowerShell like upstream's build.bat: the build runs fetch_deps.ps1 in a nested
+      # Windows PowerShell, which can't load its modules when started from pwsh.
       - name: Build
         if: steps.version.outputs.skip != 'true'
-        shell: pwsh
+        shell: powershell
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
