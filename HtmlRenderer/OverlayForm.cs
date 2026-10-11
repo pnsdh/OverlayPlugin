@@ -154,6 +154,13 @@ namespace RainbowMage.HtmlRenderer
             }
         }
 
+        // Fork: hidden overlays stop rendering (see Renderer.SetVisible).
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            base.OnVisibleChanged(e);
+            Renderer?.SetVisible(Visible);
+        }
+
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
