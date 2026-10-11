@@ -440,7 +440,7 @@ namespace RainbowMage.HtmlRenderer
         // Delete all folders which don't potentially contain overlay configuration information
         private static readonly string[] CacheFolders = new string[] { "Cache", "Code Cache", "GPUCache" };
 
-        public static void Initialize(string pluginDirectory, string appDataDirectory, bool reportErrors)
+        public static void Initialize(string pluginDirectory, string appDataDirectory, bool reportErrors, bool useGpu = false)
         {
             if (!initialized)
             {
@@ -523,7 +523,12 @@ namespace RainbowMage.HtmlRenderer
                 cefSettings.EnableAudio();
 
                 // Enables software compositing instead of GPU compositing -> less CPU load but no WebGL
-                cefSettings.SetOffScreenRenderingBestPerformanceArgs();
+                // Fork: optional GPU rasterization and compositing (frames are still read back for
+                // the layered overlay windows).
+                if (!useGpu)
+                {
+                    cefSettings.SetOffScreenRenderingBestPerformanceArgs();
+                }
 
                 Cef.Initialize(cefSettings, performDependencyCheck: true, browserProcessHandler: null);
 

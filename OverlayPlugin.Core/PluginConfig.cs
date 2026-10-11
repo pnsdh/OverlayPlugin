@@ -71,6 +71,21 @@ namespace RainbowMage.OverlayPlugin
             }
         }
 
+        // Fork: render overlays with the GPU instead of in software.  Applied at CEF startup.
+        private bool _useGpu;
+        public bool UseGpu
+        {
+            get
+            {
+                return _useGpu;
+            }
+            set
+            {
+                _useGpu = value;
+                isDirty = true;
+            }
+        }
+
         private bool _errorReports;
         public bool ErrorReports
         {
@@ -313,6 +328,7 @@ namespace RainbowMage.OverlayPlugin
             this.HideOverlaysWhenNotActive = true;
             this.HideOverlayDuringCutscene = false;
             this.ErrorReports = false;
+            this.UseGpu = false;
             this.UpdateCheck = true;
             this.IsFirstLaunch = true;
 
