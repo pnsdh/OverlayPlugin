@@ -437,6 +437,15 @@ namespace RainbowMage.HtmlRenderer
         {
             if (!initialized)
             {
+                // Fork: remove crash reporter configs even when reports are off (see EnableErrorReports).
+                try
+                {
+                    DisableErrorReports(appDataDirectory);
+                }
+                catch (Exception)
+                {
+                }
+
                 if (reportErrors)
                 {
                     try
@@ -523,6 +532,12 @@ namespace RainbowMage.HtmlRenderer
 
         public static void EnableErrorReports(string appDataDirectory)
         {
+            // Fork: crash reports would go to upstream's server (CRASH_SERVER) for builds upstream
+            // didn't make, so they stay off and any config written by upstream is removed.
+            DisableErrorReports(appDataDirectory);
+            return;
+
+#pragma warning disable CS0162 // Unreachable code: kept unchanged to ease upstream merges.
             // Unfortunately, we can't change the path to this configuration file without using our own .exe for
             // all overlays (which would add IPC overhead) or recompiling CEF.
             // For details, see this https://bitbucket.org/chromiumembedded/cef/wiki/CrashReporting.md
@@ -555,6 +570,7 @@ MaxUploadsPerDay=0
 ";
             File.WriteAllText(cfgPath, cfgText);
             File.WriteAllText(subCfgPath, cfgText);
+#pragma warning restore CS0162
         }
 
         public static void ClearCache()

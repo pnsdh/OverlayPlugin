@@ -1,0 +1,116 @@
+# Fork-only: builds the plugin zip and publishes a GitHub release of this fork, which the
+# in-ACT auto updater picks up (see repo in OverlayPlugin.Updater/Updater.cs).
+# Version = upstream version + fork revision (0.19.109 -> v0.19.109.1, v0.19.109.2, ...).
+# Directory.Build.props stays identical to upstream; its version is rewritten only in CI.
+# Uses secret SYNC_TOKEN to create the release: tagging a commit that contains workflow files
+# needs the Workflows permission, which GITHUB_TOKEN never has (403).
+name: Fork Release
+
+on:
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    concurrency:
+      group: fork-release
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Compute Fork Version
+        id: version
+        run: |
+          sha=$(git rev-parse HEAD)
+          base=$(sed -n -E 's/.*<AssemblyVersion>([^<]*)<.*/\1/p' Directory.Build.props | head -n 1)
+          prev=$(git tag -l 'v*.*.*.*' --sort=-v:refname | head -n 1)
+          if [ -n "$prev" ] && [ "$(git rev-list -n 1 "$prev")" = "$sha" ]; then
+            echo "::notice::main is already released as $prev. Skipping."
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          last=$(git tag -l "v${base}.*" | sed "s/^v${base}\.//" | sort -n | tail -n 1)
+          version="${base}.$(( ${last:-0} + 1 ))"
+          echo "::notice::Releasing $version (upstream $base, previous ${prev:-none})"
+          {
+            echo "skip=false"
+            echo "sha=$sha"
+            echo "base=$base"
+            echo "version=$version"
+            echo "prev=$prev"
+          } >> $GITHUB_OUTPUT
+
+      - name: Check dependencies cache
+        if: steps.version.outputs.skip != 'true'
+        id: cache-dependencies
+        uses: actions/cache@v5
+        with:
+          path: |
+            ./Thirdparty
+            ./OverlayPlugin.Core/Thirdparty
+          key: ${{ runner.os }}-overlayplugin-${{ hashFiles('./tools/fetch_deps.ps1', './DEPS.json', './tools/StripFFXIVClientStructs/StripFFXIVClientStructs/StripFFXIVClientStructs.cs') }}
+          restore-keys: |
+            ${{ runner.os }}-overlayplugin-
+
+      - name: Fetch Dependencies
+        if: steps.version.outputs.skip != 'true' && steps.cache-dependencies.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: .\tools\fetch_deps.ps1
+
+      - name: Set up msbuild
+        if: steps.version.outputs.skip != 'true'
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Set Fork Version
+        if: steps.version.outputs.skip != 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sed -i -E "s#<(Assembly|File)Version>[^<]*<#<\1Version>${VERSION}<#" Directory.Build.props
+          grep -E "<(Assembly|File)Version>" Directory.Build.props
+          count=$(grep -cE "<(Assembly|File)Version>${VERSION}<" Directory.Build.props)
+          if [ "$count" -ne 2 ]; then
+            echo "::error::Expected 2 versions set to ${VERSION}, found ${count}"
+            exit 1
+          fi
+
+      # build.ps1 (not build.bat, which pauses) builds and packs out/OverlayPlugin-<version>.zip
+      # with a top-level OverlayPlugin/ folder, as the updater expects (strippedDirs = 1).
+      - name: Build
+        if: steps.version.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          .\build.ps1
+          if (-not (Test-Path "out\OverlayPlugin-$env:VERSION.zip")) {
+            echo "::error::out\OverlayPlugin-$env:VERSION.zip was not built"
+            exit 1
+          }
+
+      - name: Create Release
+        if: steps.version.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          SHA: ${{ steps.version.outputs.sha }}
+          BASE: ${{ steps.version.outputs.base }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PREV: ${{ steps.version.outputs.prev }}
+        run: |
+          notes_args=()
+          if [ -n "$PREV" ]; then
+            notes_args=(--notes-start-tag "$PREV")
+          fi
+          gh release create "v${VERSION}" "out/OverlayPlugin-${VERSION}.zip" \
+            --target "$SHA" \
+            --title "$VERSION" \
+            --notes "본가 v${BASE} 기반." \
+            --generate-notes "${notes_args[@]}"
