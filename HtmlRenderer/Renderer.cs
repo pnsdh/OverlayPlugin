@@ -585,7 +585,9 @@ MaxUploadsPerDay=0
         }
 
         // Starts the fork's profile from upstream's once, so overlay settings kept in local storage
-        // carry over.  Disposable caches are skipped.
+        // carry over.  Disposable caches are skipped.  Upstream's CEF 95 keeps the profile in the
+        // cache folder itself; CEF 152 (Chrome bootstrap) uses its "Default" subfolder when the
+        // cache path is the root cache path.
         private static void CopyUpstreamProfile(string from, string to)
         {
             if (Directory.Exists(to) || !Directory.Exists(from))
@@ -596,7 +598,7 @@ MaxUploadsPerDay=0
             {
                 if (Directory.Exists(tmp))
                     Directory.Delete(tmp, true);
-                CopyDirectory(from, tmp, true);
+                CopyDirectory(from, Path.Combine(tmp, "Default"), true);
                 Directory.Move(tmp, to);
             }
             catch (Exception)
