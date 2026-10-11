@@ -430,6 +430,13 @@ namespace RainbowMage.HtmlRenderer
         static bool initialized = false;
         private static string CachePath = null;
 
+        // Fork: CEF and its profile live in folders of their own, so switching between this fork
+        // and upstream (older CEF) never re-downloads CEF or opens a profile written by a newer
+        // Chromium (which Chromium doesn't support).  Must match PluginLoader.GetCefPath.
+        public const string CefFolderName = "OverlayPluginCef-cbkr";
+        private const string CacheFolderName = "OverlayPluginCache-cbkr";
+        private const string UpstreamCacheFolderName = "OverlayPluginCache";
+
         // Delete all folders which don't potentially contain overlay configuration information
         private static readonly string[] CacheFolders = new string[] { "Cache", "Code Cache", "GPUCache" };
 
@@ -462,7 +469,7 @@ namespace RainbowMage.HtmlRenderer
 #if DEBUG
                 var cefPath = Path.Combine(pluginDirectory, "libs");
 #else
-                var cefPath = Path.Combine(appDataDirectory, "OverlayPluginCef", Environment.Is64BitProcess ? "x64" : "x86");
+                var cefPath = Path.Combine(appDataDirectory, CefFolderName, Environment.Is64BitProcess ? "x64" : "x86");
 #endif
 
                 var lang = System.Globalization.CultureInfo.CurrentCulture.Name;
@@ -474,12 +481,16 @@ namespace RainbowMage.HtmlRenderer
                     lang = "en-US";
                 }
 
-                CachePath = Path.Combine(appDataDirectory, "OverlayPluginCache");
+                CachePath = Path.Combine(appDataDirectory, CacheFolderName);
+                CopyUpstreamProfile(Path.Combine(appDataDirectory, UpstreamCacheFolderName), CachePath);
 
                 var cefSettings = new CefSettings
                 {
                     WindowlessRenderingEnabled = true,
                     Locale = lang,
+                    // CEF 120+ locks the root cache path per process and requires the cache path
+                    // to be inside it.
+                    RootCachePath = CachePath,
                     CachePath = CachePath,
                     MultiThreadedMessageLoop = true,
                     LogFile = Path.Combine(appDataDirectory, "OverlayPluginCEF.log"),
@@ -543,7 +554,7 @@ namespace RainbowMage.HtmlRenderer
             // For details, see this https://bitbucket.org/chromiumembedded/cef/wiki/CrashReporting.md
 
             var subProcess = Path.Combine(appDataDirectory,
-                                          "OverlayPluginCef",
+                                          CefFolderName,
                                           Environment.Is64BitProcess ? "x64" : "x86");
             var subCfgPath = Path.Combine(subProcess, "crash_reporter.cfg");
 
@@ -573,6 +584,57 @@ MaxUploadsPerDay=0
 #pragma warning restore CS0162
         }
 
+        // Starts the fork's profile from upstream's once, so overlay settings kept in local storage
+        // carry over.  Disposable caches are skipped.  Upstream's CEF 95 keeps the profile in the
+        // cache folder itself; CEF 152 (Chrome bootstrap) uses its "Default" subfolder when the
+        // cache path is the root cache path.
+        private static void CopyUpstreamProfile(string from, string to)
+        {
+            if (Directory.Exists(to) || !Directory.Exists(from))
+                return;
+
+            var tmp = to + ".tmp";
+            try
+            {
+                if (Directory.Exists(tmp))
+                    Directory.Delete(tmp, true);
+                CopyDirectory(from, Path.Combine(tmp, "Default"), true);
+                Directory.Move(tmp, to);
+            }
+            catch (Exception)
+            {
+                // Start with an empty profile instead.
+                try
+                {
+                    if (Directory.Exists(tmp))
+                        Directory.Delete(tmp, true);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        private static void CopyDirectory(string from, string to, bool isRoot)
+        {
+            Directory.CreateDirectory(to);
+            foreach (var file in Directory.GetFiles(from))
+            {
+                var name = Path.GetFileName(file);
+                // Chromium's lock files of a running instance and leftover temp files.
+                if (name == "lockfile" || name == "LOCK" || name.EndsWith(".tmp"))
+                    continue;
+                File.Copy(file, Path.Combine(to, name));
+            }
+            foreach (var dir in Directory.GetDirectories(from))
+            {
+                var name = Path.GetFileName(dir);
+                if (isRoot && Array.IndexOf(CacheFolders, name) >= 0)
+                    continue;
+                CopyDirectory(dir, Path.Combine(to, name), false);
+            }
+        }
+
         public static void ClearCache()
         {
             if (CachePath != null)
@@ -591,7 +653,7 @@ MaxUploadsPerDay=0
         public static void DisableErrorReports(string appDataDirectory)
         {
             var subProcess = Path.Combine(appDataDirectory,
-                                          "OverlayPluginCef",
+                                          CefFolderName,
                                           Environment.Is64BitProcess ? "x64" : "x86");
             var subCfgPath = Path.Combine(subProcess, "crash_reporter.cfg");
 

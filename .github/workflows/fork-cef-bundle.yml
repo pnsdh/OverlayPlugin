@@ -1,0 +1,39 @@
+# Fork-only: packs the CEF bundle (build-cef-redists.ps1) for the CefSharp version referenced by
+# HtmlRenderer.csproj and releases it on pnsdh/OverlayPlugin-CEF as v<CEF version>, where
+# CefInstaller downloads it from.  Run it whenever the CefSharp packages are updated, before
+# releasing a plugin build that needs the new CEF_VERSION.
+# Uses secret SYNC_TOKEN, which must also have Contents read/write on pnsdh/OverlayPlugin-CEF.
+name: Fork CEF Bundle
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v6
+
+      - name: Build CEF Bundle
+        shell: pwsh
+        run: .\build-cef-redists.ps1
+
+      - name: Release CEF Bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          archive=$(ls out/CefSharp-*-x64.7z)
+          version=$(basename "$archive" | sed -E 's/^CefSharp-(.*)-x64\.7z$/\1/')
+          sha=$(sha256sum "$archive" | cut -d' ' -f1)
+          echo "::notice::CEF $version, sha256 $sha"
+          if gh release view "v${version}" -R pnsdh/OverlayPlugin-CEF > /dev/null 2>&1; then
+            echo "::notice::v${version} is already released. Skipping."
+            exit 0
+          fi
+          gh release create "v${version}" "$archive" -R pnsdh/OverlayPlugin-CEF \
+            --title "CEF ${version}" \
+            --notes "OverlayPlugin(pnsdh 포크)용 CEF/CefSharp 번들. sha256: \`${sha}\`"
