@@ -349,10 +349,13 @@ namespace RainbowMage.OverlayPlugin.Updater
                 lastCheck = config.LastUpdateCheck,
                 currentVersion = Assembly.GetExecutingAssembly().GetName().Version,
                 checkInterval = TimeSpan.FromMinutes(5),
-                repo = "OverlayPlugin/OverlayPlugin",
+                // Fork: updates come from this fork's releases (v<upstream>.<N>).  actPluginId must
+                // stay 0: ACT's plugin index (#86) reports upstream's version, which this fork's
+                // download URL doesn't have.
+                repo = "pnsdh/OverlayPlugin",
                 downloadUrl = "https://github.com/{REPO}/releases/download/v{VERSION}/OverlayPlugin-{VERSION}.zip",
                 strippedDirs = 1,
-                actPluginId = 86,
+                actPluginId = 0,
             };
 
             await RunAutoUpdater(options, manualCheck);
