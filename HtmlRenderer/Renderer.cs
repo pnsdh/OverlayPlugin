@@ -22,6 +22,14 @@ namespace RainbowMage.HtmlRenderer
         const string CRASH_SERVER = "https://sentry.gruenprint.de/api/12/minidump/?sentry_key=5742b37c4b71484e9ba590c6a6a0e137";
         public static bool noMoreRenders = false;
 
+        // Fork: with the GPU option, overlay windows show CEF's shared textures through
+        // DirectComposition (see DCompPresenter).  Set by Initialize.
+        public static bool SharedTextures { get; private set; } = false;
+        public static string SharedTextureError { get; private set; } = null;
+        // Set when this renderer's shared textures failed (e.g. CEF's GPU differs from ours), so
+        // its browser is recreated with CPU frames.
+        private bool sharedTexturesFailed = false;
+
         public event EventHandler<BrowserErrorEventArgs> BrowserError;
         public event EventHandler<BrowserLoadEventArgs> BrowserStartLoading;
         public event EventHandler<BrowserLoadEventArgs> BrowserLoad;
@@ -189,6 +197,7 @@ namespace RainbowMage.HtmlRenderer
             cefWindowInfo.SetAsWindowless(IntPtr.Zero);
             cefWindowInfo.Width = _target.Width;
             cefWindowInfo.Height = _target.Height;
+            cefWindowInfo.SharedTextureEnabled = SharedTextures && !sharedTexturesFailed && _target is IAcceleratedRenderTarget;
 
             return cefWindowInfo;
         }
@@ -209,6 +218,14 @@ namespace RainbowMage.HtmlRenderer
 
             cefBrowserSettings.Dispose();
             cefWindowInfo.Dispose();
+        }
+
+        // Fork: recreates the browser with CPU frames (OnPaint) after its shared textures failed.
+        public void FallBackToCpuFrames()
+        {
+            if (sharedTexturesFailed) return;
+            sharedTexturesFailed = true;
+            BeginRender();
         }
 
         public void EndRender()
@@ -522,10 +539,20 @@ namespace RainbowMage.HtmlRenderer
 
                 cefSettings.EnableAudio();
 
+                // Fork: Chromium relaunches itself de-elevated when started elevated (CEF 120+), which
+                // makes Cef.Initialize fail inside an ACT that runs as administrator.
+                cefSettings.CefCommandLineArgs["do-not-de-elevate"] = "1";
+
                 // Enables software compositing instead of GPU compositing -> less CPU load but no WebGL
-                // Fork: optional GPU rasterization and compositing (frames are still read back for
-                // the layered overlay windows).
-                if (!useGpu)
+                // Fork: optional GPU rendering whose frames go straight to the overlay windows as
+                // shared textures (no readback to the CPU).
+                if (useGpu)
+                {
+                    string error;
+                    SharedTextures = DCompPresenter.Initialize(out error);
+                    SharedTextureError = error;
+                }
+                else
                 {
                     cefSettings.SetOffScreenRenderingBestPerformanceArgs();
                 }
@@ -816,6 +843,27 @@ MaxUploadsPerDay=0
             else
             {
                 target.RenderFrame(type, dirtyRect, buffer, width, height);
+            }
+        }
+
+        // Fork: shared texture frames (see Renderer.SharedTextures).
+        void IRenderWebBrowser.OnAcceleratedPaint(PaintElementType type, Rect dirtyRect, AcceleratedPaintInfo acceleratedPaintInfo)
+        {
+            if (!(target is IAcceleratedRenderTarget accelerated)) return;
+
+            accelerated.RenderAcceleratedFrame(type, dirtyRect, acceleratedPaintInfo.SharedTextureHandle);
+
+            if (screenshotSource != null && type == PaintElementType.View)
+            {
+                try
+                {
+                    screenshotSource.SetResult(accelerated.CaptureFrame());
+                }
+                catch (Exception ex)
+                {
+                    screenshotSource.SetException(ex);
+                }
+                screenshotSource = null;
             }
         }
 

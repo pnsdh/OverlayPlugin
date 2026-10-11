@@ -15,14 +15,22 @@ using CefSharp;
 using CefSharp.Enums;
 using CefSharp.Structs;
 using RainbowMage.HtmlRenderer;
+using CefRenderer = RainbowMage.HtmlRenderer.Renderer;
 using Point = System.Drawing.Point;
 
 namespace RainbowMage.HtmlRenderer
 {
-    public partial class OverlayForm : Form, IWinFormsTarget
+    public partial class OverlayForm : Form, IWinFormsTarget, IAcceleratedRenderTarget
     {
         private DIBitmap surfaceBuffer;
         private bool terminated = false;
+
+        // Fork: with shared textures the window shows its frames through DirectComposition
+        // instead of UpdateLayeredWindow (see DCompPresenter).
+        private readonly bool useDComp = CefRenderer.SharedTextures;
+        private DCompPresenter presenter;
+        private int sharedFrameFailures = 0;
+        private System.Windows.Forms.Timer hitTestTimer;
 
         private const int WS_EX_TOPMOST = 0x00000008;
         private const int WS_EX_LAYERED = 0x00080000;
@@ -136,9 +144,63 @@ namespace RainbowMage.HtmlRenderer
             {
                 var cp = base.CreateParams;
                 cp.ExStyle = cp.ExStyle | WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_NOACTIVATE;
+                if (useDComp)
+                {
+                    cp.ExStyle |= NativeMethods.WS_EX_NOREDIRECTIONBITMAP;
+                }
                 cp.ClassStyle = cp.ClassStyle | CP_NOCLOSE_BUTTON;
 
                 return cp;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+
+            if (useDComp)
+            {
+                // Layered (for click-through) but drawn by DirectComposition: fully opaque layer.
+                NativeMethods.SetLayeredWindowAttributes(Handle, 0, 255, NativeMethods.LWA_ALPHA);
+                presenter?.Dispose();
+                presenter = new DCompPresenter(Handle);
+
+                if (hitTestTimer == null)
+                {
+                    hitTestTimer = new System.Windows.Forms.Timer { Interval = 30 };
+                    hitTestTimer.Tick += HitTestTimer_Tick;
+                    hitTestTimer.Start();
+                }
+            }
+        }
+
+        // Layered windows drawn by UpdateLayeredWindow let clicks through fully transparent pixels.
+        // A DirectComposition window doesn't, so unless the overlay is click-through, the window
+        // becomes transparent to the mouse while the cursor is over a transparent pixel.
+        private void HitTestTimer_Tick(object sender, EventArgs e)
+        {
+            if (terminated || presenter == null || isClickThru || MouseButtons != MouseButtons.None) return;
+
+            var cursor = Cursor.Position;
+            if (!Bounds.Contains(cursor)) return;
+
+            bool opaque;
+            try
+            {
+                opaque = presenter.IsOpaqueAt(cursor.X - Left, cursor.Y - Top);
+            }
+            catch
+            {
+                return;
+            }
+
+            if (opaque)
+            {
+                DisableMouseClickThru();
+            }
+            else
+            {
+                EnableMouseClickThru();
             }
         }
 
@@ -177,7 +239,7 @@ namespace RainbowMage.HtmlRenderer
 
         private void UpdateLayeredWindowBitmap()
         {
-            if (surfaceBuffer.IsDisposed || this.terminated) { return; }
+            if (useDComp || surfaceBuffer.IsDisposed || this.terminated) { return; }
 
             var blend = new NativeMethods.BlendFunction
             {
@@ -254,24 +316,44 @@ namespace RainbowMage.HtmlRenderer
 
         private void EnableMouseClickThru()
         {
+            var ex = NativeMethods.GetWindowLong(this.Handle, NativeMethods.GWL_EXSTYLE);
+            if ((ex & NativeMethods.WS_EX_TRANSPARENT) != 0) return;
             NativeMethods.SetWindowLong(
                 this.Handle,
                 NativeMethods.GWL_EXSTYLE,
-                NativeMethods.GetWindowLong(this.Handle, NativeMethods.GWL_EXSTYLE) | NativeMethods.WS_EX_TRANSPARENT);
+                ex | NativeMethods.WS_EX_TRANSPARENT);
         }
 
         private void DisableMouseClickThru()
         {
+            var ex = NativeMethods.GetWindowLong(this.Handle, NativeMethods.GWL_EXSTYLE);
+            if ((ex & NativeMethods.WS_EX_TRANSPARENT) == 0) return;
             NativeMethods.SetWindowLong(
                 this.Handle,
                 NativeMethods.GWL_EXSTYLE,
-                NativeMethods.GetWindowLong(this.Handle, NativeMethods.GWL_EXSTYLE) & ~NativeMethods.WS_EX_TRANSPARENT);
+                ex & ~NativeMethods.WS_EX_TRANSPARENT);
         }
 
         #endregion
 
         public void RenderFrame(PaintElementType type, Rect dirtyRect, IntPtr buffer, int width, int height)
         {
+            if (useDComp)
+            {
+                // CPU frames (no shared textures, or after falling back) are shown the same way.
+                if (!this.terminated && presenter != null && type == PaintElementType.View)
+                {
+                    try
+                    {
+                        presenter.PresentBuffer(buffer, width, height);
+                    }
+                    catch
+                    {
+                    }
+                }
+                return;
+            }
+
             if (!this.terminated)
             {
                 try
@@ -298,6 +380,31 @@ namespace RainbowMage.HtmlRenderer
 
                 }
             }
+        }
+
+        public void RenderAcceleratedFrame(PaintElementType type, Rect dirtyRect, IntPtr sharedHandle)
+        {
+            if (this.terminated || presenter == null || type != PaintElementType.View) return;
+
+            try
+            {
+                presenter.PresentShared(sharedHandle);
+                sharedFrameFailures = 0;
+            }
+            catch
+            {
+                // E.g. CEF renders on another GPU than this device, so its textures can not be
+                // opened here.  Switch this overlay to CPU frames.
+                if (++sharedFrameFailures == 3 && IsHandleCreated)
+                {
+                    BeginInvoke(new Action(() => Renderer?.FallBackToCpuFrames()));
+                }
+            }
+        }
+
+        public Bitmap CaptureFrame()
+        {
+            return presenter?.Capture();
         }
 
         public void ClearFrame()
@@ -330,6 +437,10 @@ namespace RainbowMage.HtmlRenderer
 
             if (disposing)
             {
+                hitTestTimer?.Dispose();
+                hitTestTimer = null;
+                presenter?.Dispose();
+                presenter = null;
                 surfaceBuffer?.Dispose();
                 surfaceBuffer = null;
                 Renderer?.Dispose();

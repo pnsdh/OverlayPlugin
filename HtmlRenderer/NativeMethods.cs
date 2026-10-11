@@ -239,5 +239,12 @@ namespace RainbowMage.HtmlRenderer
         public const int WM_SYSKEYDOWN = 0x0104;
         public const int WM_SYSKEYUP = 0x0105;
         public const int WM_SYSCHAR = 0x0106;
+
+        // Fork: DirectComposition overlay windows (see DCompPresenter).
+        public const int WS_EX_NOREDIRECTIONBITMAP = 0x00200000;
+        public const uint LWA_ALPHA = 0x2;
+
+        [DllImport("user32")]
+        public static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
     }
 }
