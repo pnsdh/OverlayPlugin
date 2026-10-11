@@ -35,6 +35,7 @@ namespace RainbowMage.OverlayPlugin
             logger = container.Resolve<ILogger>();
 
             cbErrorReports.Checked = config.ErrorReports;
+            SetupGpuOption();
             cbUpdateCheck.Checked = config.UpdateCheck;
             cbHideOverlaysWhenNotActive.Checked = config.HideOverlaysWhenNotActive;
             cbHideOverlaysDuringCutscene.Checked = config.HideOverlayDuringCutscene;
@@ -44,6 +45,25 @@ namespace RainbowMage.OverlayPlugin
             cbUpdateCheck.CheckedChanged += CbUpdateCheck_CheckedChanged;
             cbHideOverlaysWhenNotActive.CheckedChanged += cbHideOverlaysWhenNotActive_CheckedChanged;
             cbHideOverlaysDuringCutscene.CheckedChanged += cbHideOverlaysDuringCutscene_CheckedChanged;
+        }
+
+        // Fork: crash reports are always off (see Renderer.EnableErrorReports), so their checkbox's
+        // place holds the GPU option.
+        private void SetupGpuOption()
+        {
+            var ko = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
+            var cbUseGpu = new CheckBox
+            {
+                Name = "cbUseGpu",
+                Text = ko ? "GPU로 오버레이 그리기 (ACT를 다시 시작하면 적용)" : "Render overlays with the GPU (applies after restarting ACT)",
+                Location = cbErrorReports.Location,
+                AutoSize = true,
+                UseVisualStyleBackColor = true,
+                Checked = config.UseGpu,
+            };
+            cbUseGpu.CheckedChanged += (o, e) => config.UseGpu = cbUseGpu.Checked;
+            cbErrorReports.Visible = false;
+            Controls.Add(cbUseGpu);
         }
 
         public void SetReadmeVisible(bool visible)

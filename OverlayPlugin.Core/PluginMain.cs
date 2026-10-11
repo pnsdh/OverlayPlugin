@@ -124,7 +124,7 @@ namespace RainbowMage.OverlayPlugin
                 this.label.Text = "Init Phase 1: CEF";
                 try
                 {
-                    Renderer.Initialize(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName, Config.ErrorReports);
+                    Renderer.Initialize(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName, Config.ErrorReports, Config.UseGpu);
                 }
                 catch (Exception e)
                 {
