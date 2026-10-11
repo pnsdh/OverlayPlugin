@@ -102,10 +102,6 @@ namespace RainbowMage.HtmlRenderer
         {
             // Make sure we use the correct size for rendering. CEF sometimes ignores the size passed in WindowInfo (see BeginRender()).
             Resize(_target.Width, _target.Height);
-
-            // Fork: an overlay created hidden starts paused (see SetVisible).
-            if (_hidden)
-                _browser.GetBrowserHost().WasHidden(true);
         }
 
         private void Browser_FrameLoadStart(object sender, FrameLoadStartEventArgs e)
@@ -296,23 +292,16 @@ namespace RainbowMage.HtmlRenderer
             }
         }
 
-        // Fork: hidden overlays stop rendering (no frames, animations or requestAnimationFrame);
-        // their scripts keep running at full speed (see the background throttling switches in
-        // Initialize), so sound alerts aren't delayed.  Upstream left this disabled because CEF 95
-        // sometimes stopped painting afterwards; CEF 152 resumes fine.
-        private bool _hidden = false;
-
         public void SetVisible(bool visible)
         {
-            _hidden = !visible;
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
-                var host = this._browser.GetBrowserHost();
-                host.WasHidden(!visible);
-                if (visible)
-                {
-                    host.Invalidate(PaintElementType.View);
-                }
+                // Sometimes, CEF stops emitting OnPaint events after this call.
+                // Not sure why, probably a timing issue.
+                // TODO: Debug this further. Will probably require debugging libcef.dll directly.
+                //       Modifying _browser.Size immidiately after the WasHidden() call leads to a crash in libcef.dll,
+                //       that might be a good place to start investigating.
+                //Task.Run(() => this._browser.GetBrowserHost().WasHidden(!visible));
             }
         }
 
@@ -554,20 +543,11 @@ namespace RainbowMage.HtmlRenderer
                 // makes Cef.Initialize fail inside an ACT that runs as administrator.
                 cefSettings.CefCommandLineArgs["do-not-de-elevate"] = "1";
 
-                // Fork: hidden overlays only stop rendering (see SetVisible); their timers must
-                // keep firing on time for sound alerts.
-                cefSettings.CefCommandLineArgs["disable-background-timer-throttling"] = "1";
-                cefSettings.CefCommandLineArgs["disable-renderer-backgrounding"] = "1";
-
                 // Enables software compositing instead of GPU compositing -> less CPU load but no WebGL
                 // Fork: optional GPU rendering whose frames go straight to the overlay windows as
                 // shared textures (no readback to the CPU).
                 if (useGpu)
                 {
-                    // Frames are paced by WindowlessFrameRate (begin-frame scheduling); waiting for
-                    // vsync in the GPU process only costs CPU (measured about 6% less).
-                    cefSettings.CefCommandLineArgs["disable-gpu-vsync"] = "1";
-
                     string error;
                     SharedTextures = DCompPresenter.Initialize(out error);
                     SharedTextureError = error;
