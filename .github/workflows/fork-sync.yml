@@ -80,9 +80,10 @@ jobs:
         if: steps.merge.outputs.status == 'merged'
         uses: microsoft/setup-msbuild@v3
 
+      # Windows PowerShell: see the Build step of fork-release.yml.
       - name: Build Merged Tree
         if: steps.merge.outputs.status == 'merged'
-        shell: pwsh
+        shell: powershell
         run: |
           .\tools\strip-clientstructs.ps1
           dotnet publish -c release
