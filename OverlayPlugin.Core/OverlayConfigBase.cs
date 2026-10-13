@@ -112,6 +112,27 @@ namespace RainbowMage.OverlayPlugin
             }
         }
 
+        // Fork: render at 1.5x the refresh rate of the overlay's monitor instead of MaxFrameRate
+        // (see OverlayBase.ApplyFrameRate).
+        public event EventHandler MatchRefreshRateChanged;
+
+        private bool matchRefreshRate;
+        public bool MatchRefreshRate
+        {
+            get
+            {
+                return this.matchRefreshRate;
+            }
+            set
+            {
+                if (this.matchRefreshRate != value)
+                {
+                    this.matchRefreshRate = value;
+                    MatchRefreshRateChanged?.Invoke(this, EventArgs.Empty);
+                }
+            }
+        }
+
         private bool globalHotkeyEnabled;
         [Obsolete("Use the GlobalHotkeys list instead", true)]
         public bool GlobalHotkeyEnabled
