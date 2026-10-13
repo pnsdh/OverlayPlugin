@@ -200,7 +200,7 @@ namespace RainbowMage.OverlayPlugin.Overlays
             var ko = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
             nudMaxFrameRate.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             nudMaxFrameRate.Width = 80;
-            var cbMatchRefreshRate = new CheckBox
+            cbMatchRefreshRate = new CheckBox
             {
                 Name = "cbMatchRefreshRate",
                 Text = ko ? "모니터에 맞춤 (주사율의 1.5배로 그려 끊김 없이)" : "Match the monitor (1.5x its refresh rate, for smooth motion)",
@@ -209,13 +209,21 @@ namespace RainbowMage.OverlayPlugin.Overlays
                 UseVisualStyleBackColor = true,
                 Checked = config.MatchRefreshRate,
             };
-            nudMaxFrameRate.Enabled = !cbMatchRefreshRate.Checked;
             cbMatchRefreshRate.CheckedChanged += (o, e) =>
             {
                 config.MatchRefreshRate = cbMatchRefreshRate.Checked;
-                nudMaxFrameRate.Enabled = !cbMatchRefreshRate.Checked;
+                UpdateFrameRateOptions();
             };
             tabAdvanced.Controls.Add(cbMatchRefreshRate);
+        }
+
+        private CheckBox cbMatchRefreshRate;
+
+        // Fork: the frame rate options are for CEF; WebView2 draws with the display.
+        private void UpdateFrameRateOptions()
+        {
+            cbMatchRefreshRate.Enabled = !config.UseWebView2;
+            nudMaxFrameRate.Enabled = !config.UseWebView2 && !config.MatchRefreshRate;
         }
 
         // Fork: the renderer of this overlay (see OverlayConfigBase.UseWebView2).
@@ -239,15 +247,22 @@ namespace RainbowMage.OverlayPlugin.Overlays
                 Checked = config.UseWebView2,
                 Enabled = available || config.UseWebView2,
             };
-            cbUseWebView2.CheckedChanged += (o, e) => config.UseWebView2 = cbUseWebView2.Checked;
+            cbUseWebView2.CheckedChanged += (o, e) =>
+            {
+                config.UseWebView2 = cbUseWebView2.Checked;
+                UpdateFrameRateOptions();
+            };
+            UpdateFrameRateOptions();
             var note = new Label
             {
                 Text = !available
                     ? (ko ? "WebView2 런타임을 사용할 수 없습니다: " : "The WebView2 runtime can't be used: ") + HtmlRenderer.Renderer.WebView2Status
                     : ko
-                    ? "엣지 엔진이 모니터 갱신에 맞춰 직접 그려 움직임이 고릅니다. 프레임 레이트 설정은 쓰이지 않습니다.\n" +
+                    ? "엣지 엔진이 모니터 갱신에 맞춰 직접 그려 움직임이 고릅니다. 그래서 위의 프레임 레이트 설정은 쓰이지 않습니다.\n" +
+                      "글 입력칸을 누르면 그동안만 키보드 입력을 받고, 입력칸에서 벗어나면 게임으로 돌려줍니다.\n" +
                       "오버레이 안에 저장된 데이터(localStorage)는 처음 한 번 CEF에서 가져오고, 이후로는 따로 저장됩니다."
-                    : "Edge draws in step with the display, for even motion. The frame rate setting isn't used.\n" +
+                    : "Edge draws in step with the display, for even motion, so the frame rate settings above aren't used.\n" +
+                      "Clicking a text field takes keyboard input until the field is left, then gives it back to the game.\n" +
                       "Data the overlay stores (local storage) is copied from CEF once, then kept separately.",
                 Location = new Point(nudMaxFrameRate.Left + 2, cbUseWebView2.Bottom + 2),
                 MaximumSize = new Size(tabAdvanced.ClientSize.Width - nudMaxFrameRate.Left - 8, 0),

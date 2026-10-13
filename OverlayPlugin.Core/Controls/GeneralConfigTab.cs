@@ -55,7 +55,9 @@ namespace RainbowMage.OverlayPlugin
             var cbUseGpu = new CheckBox
             {
                 Name = "cbUseGpu",
-                Text = ko ? "GPU로 오버레이 그리기 (ACT를 다시 시작하면 적용)" : "Render overlays with the GPU (applies after restarting ACT)",
+                Text = ko
+                    ? "GPU로 오버레이 그리기 (CEF만, ACT를 다시 시작하면 적용. WebView2는 항상 GPU)"
+                    : "Render overlays with the GPU (CEF overlays; applies after restarting ACT. WebView2 overlays always use it)",
                 Location = cbErrorReports.Location,
                 AutoSize = true,
                 UseVisualStyleBackColor = true,
