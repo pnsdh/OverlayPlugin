@@ -609,10 +609,13 @@ namespace RainbowMage.HtmlRenderer
         // Fork: checks for the WebView2 runtime (part of Windows 10/11 through Edge updates).
         public static void InitializeWebView2(string pluginDirectory, string appDataDirectory)
         {
+            var userData = Path.Combine(appDataDirectory, "OverlayPluginWebView2-cbkr");
+            if (CachePath != null)
+                CopyCefStorage(Path.Combine(CachePath, "Default"), Path.Combine(userData, "EBWebView", "Default"));
             string error;
             var version = WebView2Browser.Initialize(
                 Path.Combine(pluginDirectory, "libs", "runtimes", Environment.Is64BitProcess ? "win-x64" : "win-x86", "native"),
-                Path.Combine(appDataDirectory, "OverlayPluginWebView2-cbkr"),
+                userData,
                 out error);
             WebView2Available = version != null;
             WebView2Status = version ?? error;
@@ -734,6 +737,43 @@ MaxUploadsPerDay=0
             catch (Exception)
             {
                 // Start with an empty profile instead.
+                try
+                {
+                    if (Directory.Exists(tmp))
+                        Directory.Delete(tmp, true);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
+        // Fork: WebView2 keeps a profile of its own.  Before it exists, it starts with the pages'
+        // data from the CEF profile (local storage and IndexedDB, where overlays such as MopiMopi
+        // keep their settings), as the CEF profile started with upstream's.  CEF hasn't opened
+        // them yet: no overlay exists at this point.
+        private static void CopyCefStorage(string from, string to)
+        {
+            if (Directory.Exists(to) || !Directory.Exists(from))
+                return;
+
+            var tmp = to + ".tmp";
+            try
+            {
+                if (Directory.Exists(tmp))
+                    Directory.Delete(tmp, true);
+                Directory.CreateDirectory(tmp);
+                foreach (var name in new[] { "Local Storage", "IndexedDB" })
+                {
+                    var dir = Path.Combine(from, name);
+                    if (Directory.Exists(dir))
+                        CopyDirectory(dir, Path.Combine(tmp, name), false);
+                }
+                Directory.Move(tmp, to);
+            }
+            catch (Exception)
+            {
+                // Start with empty storage instead.
                 try
                 {
                     if (Directory.Exists(tmp))
