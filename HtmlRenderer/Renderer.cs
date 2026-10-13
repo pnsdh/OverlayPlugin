@@ -81,6 +81,7 @@ namespace RainbowMage.HtmlRenderer
         public void InitBrowser()
         {
             if (noMoreRenders || _useWebView2) return;
+            EnsureCef();
 
             this._browser = new BrowserWrapper(lastUrl ?? "about:blank", automaticallyCreateBrowser: false, target: _target);
             _browser.RequestHandler = new CustomRequestHandler(this);
@@ -505,6 +506,11 @@ namespace RainbowMage.HtmlRenderer
         }
 
         static bool initialized = false;
+        static bool configured = false;
+        private static readonly object cefLock = new object();
+        private static string cefPluginDirectory;
+        private static string cefAppDataDirectory;
+        private static bool cefUseGpu;
         private static string CachePath = null;
 
         // Fork: CEF and its profile live in folders of their own, so switching between this fork
@@ -517,9 +523,11 @@ namespace RainbowMage.HtmlRenderer
         // Delete all folders which don't potentially contain overlay configuration information
         private static readonly string[] CacheFolders = new string[] { "Cache", "Code Cache", "GPUCache" };
 
+        // Fork: CEF starts when the first overlay drawn by it is created (see EnsureCef), so
+        // with every overlay drawn by WebView2 its processes never run.  This only prepares it.
         public static void Initialize(string pluginDirectory, string appDataDirectory, bool reportErrors, bool useGpu = false)
         {
-            if (!initialized)
+            if (!configured)
             {
                 // Fork: remove crash reporter configs even when reports are off (see EnableErrorReports).
                 try
@@ -543,84 +551,106 @@ namespace RainbowMage.HtmlRenderer
                     }
                 }
 
-#if DEBUG
-                var cefPath = Path.Combine(pluginDirectory, "libs");
-#else
-                var cefPath = Path.Combine(appDataDirectory, CefFolderName, Environment.Is64BitProcess ? "x64" : "x86");
-#endif
-
-                var lang = System.Globalization.CultureInfo.CurrentCulture.Name;
-                var langPak = Path.Combine(cefPath, "locales", lang + ".pak");
-
-                // Fall back to en-US if we can't find the current locale.
-                if (!File.Exists(langPak))
-                {
-                    lang = "en-US";
-                }
-
                 CachePath = Path.Combine(appDataDirectory, CacheFolderName);
                 CopyUpstreamProfile(Path.Combine(appDataDirectory, UpstreamCacheFolderName), CachePath);
 
-                var cefSettings = new CefSettings
-                {
-                    WindowlessRenderingEnabled = true,
-                    Locale = lang,
-                    // CEF 120+ locks the root cache path per process and requires the cache path
-                    // to be inside it.
-                    RootCachePath = CachePath,
-                    CachePath = CachePath,
-                    MultiThreadedMessageLoop = true,
-                    LogFile = Path.Combine(appDataDirectory, "OverlayPluginCEF.log"),
-#if DEBUG
-                    LogSeverity = LogSeverity.Info,
-#else
-                    LogSeverity = LogSeverity.Error,
-#endif
-                    BrowserSubprocessPath = Path.Combine(cefPath, "CefSharp.BrowserSubprocess.exe"),
-                };
-
-                try
-                {
-                    File.WriteAllText(cefSettings.LogFile, "");
-                }
-                catch (Exception)
-                {
-                    // Ignore; if we can't open the log, CEF can't do it either which means that we don't have to worry about log size.
-                }
-
-                // Necessary to avoid input lag with a framerate limit below 60.
-                cefSettings.CefCommandLineArgs["enable-begin-frame-scheduling"] = "1";
-
-                // Allow websites to play sound even if the user never interacted with that site (pretty common for our overlays)
-                cefSettings.CefCommandLineArgs["autoplay-policy"] = "no-user-gesture-required";
-
-                // Disable Flash. We don't need it and it can cause issues.
-                cefSettings.CefCommandLineArgs.Remove("enable-system-flash");
-
-                cefSettings.EnableAudio();
-
-                // Fork: Chromium relaunches itself de-elevated when started elevated (CEF 120+), which
-                // makes Cef.Initialize fail inside an ACT that runs as administrator.
-                cefSettings.CefCommandLineArgs["do-not-de-elevate"] = "1";
-
-                // Enables software compositing instead of GPU compositing -> less CPU load but no WebGL
                 // Fork: optional GPU rendering whose frames go straight to the overlay windows as
-                // shared textures (no readback to the CPU).
+                // shared textures (no readback to the CPU).  Set up now: overlay windows read
+                // SharedTextures before their renderer starts CEF.
                 if (useGpu)
                 {
                     string error;
                     SharedTextures = DCompPresenter.Initialize(out error);
                     SharedTextureError = error;
                 }
-                else
-                {
-                    cefSettings.SetOffScreenRenderingBestPerformanceArgs();
-                }
 
-                Cef.Initialize(cefSettings, performDependencyCheck: true, browserProcessHandler: null);
+                cefPluginDirectory = pluginDirectory;
+                cefAppDataDirectory = appDataDirectory;
+                cefUseGpu = useGpu;
+                configured = true;
+            }
+        }
 
+        public static bool CefStarted => initialized;
+
+        private static void EnsureCef()
+        {
+            lock (cefLock)
+            {
+                if (initialized || !configured) return;
+                StartCef(cefPluginDirectory, cefAppDataDirectory, cefUseGpu);
                 initialized = true;
             }
+        }
+
+        // Kept apart so that CefSharp (and libcef.dll) only loads when CEF starts.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static void StartCef(string pluginDirectory, string appDataDirectory, bool useGpu)
+        {
+#if DEBUG
+            var cefPath = Path.Combine(pluginDirectory, "libs");
+#else
+            var cefPath = Path.Combine(appDataDirectory, CefFolderName, Environment.Is64BitProcess ? "x64" : "x86");
+#endif
+
+            var lang = System.Globalization.CultureInfo.CurrentCulture.Name;
+            var langPak = Path.Combine(cefPath, "locales", lang + ".pak");
+
+            // Fall back to en-US if we can't find the current locale.
+            if (!File.Exists(langPak))
+            {
+                lang = "en-US";
+            }
+
+            var cefSettings = new CefSettings
+            {
+                WindowlessRenderingEnabled = true,
+                Locale = lang,
+                // CEF 120+ locks the root cache path per process and requires the cache path
+                // to be inside it.
+                RootCachePath = CachePath,
+                CachePath = CachePath,
+                MultiThreadedMessageLoop = true,
+                LogFile = Path.Combine(appDataDirectory, "OverlayPluginCEF.log"),
+#if DEBUG
+                LogSeverity = LogSeverity.Info,
+#else
+                LogSeverity = LogSeverity.Error,
+#endif
+                BrowserSubprocessPath = Path.Combine(cefPath, "CefSharp.BrowserSubprocess.exe"),
+            };
+
+            try
+            {
+                File.WriteAllText(cefSettings.LogFile, "");
+            }
+            catch (Exception)
+            {
+                // Ignore; if we can't open the log, CEF can't do it either which means that we don't have to worry about log size.
+            }
+
+            // Necessary to avoid input lag with a framerate limit below 60.
+            cefSettings.CefCommandLineArgs["enable-begin-frame-scheduling"] = "1";
+
+            // Allow websites to play sound even if the user never interacted with that site (pretty common for our overlays)
+            cefSettings.CefCommandLineArgs["autoplay-policy"] = "no-user-gesture-required";
+
+            // Disable Flash. We don't need it and it can cause issues.
+            cefSettings.CefCommandLineArgs.Remove("enable-system-flash");
+
+            cefSettings.EnableAudio();
+
+            // Fork: Chromium relaunches itself de-elevated when started elevated (CEF 120+), which
+            // makes Cef.Initialize fail inside an ACT that runs as administrator.
+            cefSettings.CefCommandLineArgs["do-not-de-elevate"] = "1";
+
+            // Enables software compositing instead of GPU compositing -> less CPU load but no WebGL
+            if (!useGpu)
+            {
+                cefSettings.SetOffScreenRenderingBestPerformanceArgs();
+            }
+
+            Cef.Initialize(cefSettings, performDependencyCheck: true, browserProcessHandler: null);
         }
 
         // Fork: checks for the WebView2 runtime (part of Windows 10/11 through Edge updates).
@@ -681,14 +711,21 @@ namespace RainbowMage.HtmlRenderer
             BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(message, source, line));
         }
 
+        // True when nothing holds CEF's files anymore (see ClearCache).
         public static bool Shutdown()
         {
             if (initialized)
             {
-                Cef.Shutdown();
+                ShutdownCef();
                 return true;
             }
-            return false;
+            return configured;
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static void ShutdownCef()
+        {
+            Cef.Shutdown();
         }
 
         public static void EnableErrorReports(string appDataDirectory)
