@@ -1,6 +1,6 @@
 # Fork-only: merges upstream (OverlayPlugin/OverlayPlugin) main into this fork's main when it
-# merges cleanly and builds. On conflict or failure nothing is pushed and an issue is opened
-# (closed again automatically on the next successful run, e.g. after a manual merge).
+# merges cleanly and builds. On conflict or failure nothing is pushed and the run fails with a
+# summary (Issues are disabled on this fork; GitHub mails failed scheduled runs).
 # Triggers Fork Release whenever upstream's version has no fork release yet.
 # Requires secret SYNC_TOKEN: fine-grained PAT for this repo with Contents + Workflows
 # read/write (GITHUB_TOKEN can neither push upstream's workflow changes nor trigger CI).
@@ -19,7 +19,6 @@ jobs:
     permissions:
       actions: write
       contents: read
-      issues: write
     defaults:
       run:
         shell: bash
@@ -27,8 +26,6 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # gh would otherwise pick the upstream remote added below and target the upstream repo.
       GH_REPO: ${{ github.repository }}
-      ISSUE_TITLE: '[fork-sync] upstream sync failed'
-      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -42,6 +39,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config merge.ours.driver true
           git remote add upstream https://github.com/OverlayPlugin/OverlayPlugin.git
           git fetch --no-tags upstream main
           echo "upstream_sha=$(git rev-parse upstream/main)" >> $GITHUB_OUTPUT
@@ -109,36 +107,20 @@ jobs:
             gh workflow run fork-release.yml --ref main
           }
 
-      - name: Close Sync Issue
-        run: |
-          num=$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" \
-            --json number --jq '.[0].number // empty')
-          if [ -n "$num" ]; then
-            gh issue close "$num" --comment "Upstream sync succeeded: $RUN_URL"
-          fi
-
       - name: Report Failure
         if: failure()
         env:
           STATUS: ${{ steps.merge.outputs.status }}
           UPSTREAM_SHA: ${{ steps.merge.outputs.upstream_sha }}
         run: |
-          if [ "$STATUS" = "conflict" ]; then
-            body="Merge conflict with upstream \`$UPSTREAM_SHA\`. Conflicting files:"$'\n'
-            while read -r f; do
-              body+=$'\n'"- \`$f\`"
-            done < "$RUNNER_TEMP/conflicts.txt"
-            body+=$'\n\n'"Resolve locally, then push:"
-            body+=" \`git fetch upstream && git merge upstream/main\`"
-          else
-            body="Sync failed after merging upstream \`$UPSTREAM_SHA\` (build or push)."
-          fi
-          body+=$'\n\n'"Run: $RUN_URL"
-          num=$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" \
-            --json number --jq '.[0].number // empty')
-          if [ -z "$num" ]; then
-            gh issue create --title "$ISSUE_TITLE" --body "$body"
-          elif ! gh issue view "$num" --comments --json body,comments \
-            --jq '[.body] + [.comments[].body] | join("\n")' | grep -q "$UPSTREAM_SHA"; then
-            gh issue comment "$num" --body "$body"
-          fi
+          {
+            if [ "$STATUS" = "conflict" ]; then
+              echo "Merge conflict with upstream \`$UPSTREAM_SHA\`. Conflicting files:"
+              echo
+              while read -r f; do echo "- \`$f\`"; done < "$RUNNER_TEMP/conflicts.txt"
+              echo
+              echo "Resolve locally, then push: \`git fetch upstream && git merge upstream/main\`"
+            else
+              echo "Sync failed after merging upstream \`$UPSTREAM_SHA\` (build, push or release trigger)."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
