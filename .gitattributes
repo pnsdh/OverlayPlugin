@@ -2,3 +2,6 @@
 *.Designer.cs text eol=lf
 *.csproj text eol=lf
 *.png binary
+
+# Fork: the fork keeps its own Korean README (Fork Sync sets merge.ours.driver).
+README.md merge=ours
