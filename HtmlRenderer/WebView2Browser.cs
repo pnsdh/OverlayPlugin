@@ -612,14 +612,44 @@ namespace RainbowMage.HtmlRenderer
                 tookFocus = (exStyle & WS_EX_NOACTIVATE) != 0;
                 if (tookFocus)
                     SetWindowLong(form.Handle, GWL_EXSTYLE, exStyle & ~WS_EX_NOACTIVATE);
-                // Allowed: the click on the field was this process' input.
-                SetForegroundWindow(form.Handle);
+                if (!SwitchForeground(form.Handle))
+                {
+                    // Keys keep going to the game: don't leave the window half switched.
+                    ReturnFocus(false);
+                    return;
+                }
                 controller?.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
             }
             else
             {
                 ReturnFocus(true);
             }
+        }
+
+        // Windows often refuses SetForegroundWindow, e.g. once this process has given the
+        // foreground back to the game.  Joining the foreground window's input state for the call
+        // makes it count as that window's own switch.
+        private static bool SwitchForeground(IntPtr window)
+        {
+            if (SetForegroundWindow(window) && GetForegroundWindow() == window)
+                return true;
+            var foreground = GetForegroundWindow();
+            uint unusedProcessId;
+            var foregroundThread = GetWindowThreadProcessId(foreground, out unusedProcessId);
+            var thisThread = GetCurrentThreadId();
+            var attached = foregroundThread != 0 && foregroundThread != thisThread &&
+                AttachThreadInput(thisThread, foregroundThread, true);
+            try
+            {
+                SetForegroundWindow(window);
+                BringWindowToTop(window);
+            }
+            finally
+            {
+                if (attached)
+                    AttachThreadInput(thisThread, foregroundThread, false);
+            }
+            return GetForegroundWindow() == window;
         }
 
         private void ReturnFocus(bool toPrevious)
@@ -629,7 +659,7 @@ namespace RainbowMage.HtmlRenderer
             var exStyle = GetWindowLong(form.Handle, GWL_EXSTYLE);
             SetWindowLong(form.Handle, GWL_EXSTYLE, exStyle | WS_EX_NOACTIVATE);
             if (toPrevious && focusTakenFrom != IntPtr.Zero && GetForegroundWindow() == form.Handle)
-                SetForegroundWindow(focusTakenFrom);
+                SwitchForeground(focusTakenFrom);
             focusTakenFrom = IntPtr.Zero;
         }
 
@@ -653,6 +683,18 @@ namespace RainbowMage.HtmlRenderer
 
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool BringWindowToTop(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint attach, uint attachTo, bool doAttach);
 
         // An overlay that takes the focus gives it to the page, for keyboard input.
         private void OnFormActivated(object sender, EventArgs e)
