@@ -76,7 +76,8 @@ ACT의 `Plugins` 탭 → `OverlayPlugin.dll` 탭 → `일반`(`General`)에서 `
   [Microsoft WebView2 런타임](https://developer.microsoft.com/microsoft-edge/webview2/)을 설치하고 ACT를 재시작합니다.
 
 오버레이마다 엔진을 섞어 써도 됩니다. 예를 들어 cactbot 타임라인·알람은 WebView2로, 움직임이 적은 오버레이는 CEF로 둘 수 있습니다.
-CEF는 WebView2만 쓰더라도 ACT를 실행할 때 항상 켜지고, WebView2는 하나라도 쓰는 오버레이가 있으면 공통 프로세스가 추가로 뜹니다(메모리 약 150MB).
+엔진마다 그 엔진을 쓰는 오버레이가 하나라도 있으면 공통 프로세스가 한 번 뜹니다(메모리 CEF 약 260MB, WebView2 약 150MB).
+모든 오버레이를 한 엔진으로 맞추면 다른 엔진은 아예 켜지지 않아 그만큼 메모리를 아낍니다.
 그 외에는 오버레이마다 프로세스가 하나씩(약 80~100MB) 들며, 이는 어느 엔진이든 비슷합니다.
 
 ## 해루봇 사용 시 참고사항
