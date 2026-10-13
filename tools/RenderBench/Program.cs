@@ -125,10 +125,19 @@ static class Program
                 Log.WriteLine(renderer.Report());
                 Log.WriteLine(Pacing.Report(t0Ticks));
                 if (display != null) Log.WriteLine(display.Report(t0Ticks, Pacing.Period));
+                long privateBytes = 0, workingSet = 0;
                 foreach (var p in Tree())
                 {
-                    try { Log.WriteLine($"  {p.ProcessName} {p.Id} cpu={p.TotalProcessorTime.TotalSeconds:F2}s"); } catch { }
+                    try
+                    {
+                        p.Refresh();
+                        privateBytes += p.PrivateMemorySize64;
+                        workingSet += p.WorkingSet64;
+                        Log.WriteLine($"  {p.ProcessName} {p.Id} cpu={p.TotalProcessorTime.TotalSeconds:F2}s private={p.PrivateMemorySize64 >> 20}MB ws={p.WorkingSet64 >> 20}MB");
+                    }
+                    catch { }
                 }
+                Log.WriteLine($"MEMORY private={privateBytes >> 20}MB working set={workingSet >> 20}MB (process tree)");
                 display?.Dispose();
                 renderer.Dispose();
                 Application.Exit();
