@@ -25,6 +25,8 @@ jobs:
         shell: bash
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # gh would otherwise pick the upstream remote added below and target the upstream repo.
+      GH_REPO: ${{ github.repository }}
       ISSUE_TITLE: '[fork-sync] upstream sync failed'
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
