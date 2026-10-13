@@ -130,6 +130,15 @@ namespace RainbowMage.OverlayPlugin
                 {
                     _logger.Log(LogLevel.Error, "InitPlugin: {0}", e);
                 }
+                // Fork: for overlays drawn by WebView2 (see OverlayConfigBase.UseWebView2).
+                try
+                {
+                    Renderer.InitializeWebView2(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName);
+                }
+                catch (Exception e)
+                {
+                    _logger.Log(LogLevel.Error, "InitPlugin: WebView2: {0}", e);
+                }
 
 #if TRACEPERF
                 _logger.Log(LogLevel.Debug, "CEF init took {0}s.", watch.Elapsed.TotalSeconds);

@@ -48,7 +48,8 @@ namespace RainbowMage.OverlayPlugin
         // See https://learn.microsoft.com/en-us/dotnet/fundamentals/code-analysis/quality-rules/ca1033
 #pragma warning disable CA1033
         IOverlayConfig IOverlay.Config { get => Config; set => Config = (TConfig)value; }
-        IntPtr IOverlay.Handle { get => Overlay == null ? IntPtr.Zero : Overlay.Handle; }
+        // Fork: zero rather than an exception once the window is disposed (e.g. while ACT closes).
+        IntPtr IOverlay.Handle { get => Overlay == null || Overlay.IsDisposed || !Overlay.IsHandleCreated ? IntPtr.Zero : Overlay.Handle; }
 #pragma warning restore CA1033
 
         public bool Visible
@@ -127,7 +128,14 @@ namespace RainbowMage.OverlayPlugin
         {
             try
             {
-                this.Overlay = new OverlayForm(this.Name, Config.Uuid.ToString(), Config.Url, this.Config.MaxFrameRate, new OverlayApi(container, this));
+                this.Overlay = new OverlayForm(this.Name, Config.Uuid.ToString(), Config.Url, this.Config.MaxFrameRate, new OverlayApi(container, this), this.Config.UseWebView2);
+                if (this.Config.UseWebView2)
+                {
+                    if (this.Overlay.Renderer.UsesWebView2)
+                        Log(LogLevel.Info, "Drawing with WebView2 {0}.", HtmlRenderer.Renderer.WebView2Status);
+                    else
+                        Log(LogLevel.Warning, "WebView2 can't be used ({0}); drawing with CEF.", HtmlRenderer.Renderer.WebView2Status);
+                }
 
                 // 画面外にウィンドウがある場合は、初期表示位置をシステムに設定させる
                 if (!Util.IsOnScreen(this.Overlay))
@@ -297,6 +305,7 @@ namespace RainbowMage.OverlayPlugin
             };
             this.Config.MaxFrameRateChanged += (o, e) => ApplyFrameRate();
             this.Config.MatchRefreshRateChanged += (o, e) => ApplyFrameRate();
+            this.Config.UseWebView2Changed += (o, e) => RecreateOverlay();
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             this.Config.GlobalHotkeyChanged += (o, e) => UpdateHotKey();
             this.Config.UrlChanged += (o, e) =>
@@ -392,6 +401,34 @@ namespace RainbowMage.OverlayPlugin
             Log(level, string.Format(format, args));
         }
 
+
+        // Fork: replaces the overlay's window with a new one, to switch its renderer
+        // (UseWebView2) without restarting ACT.
+        protected void RecreateOverlay()
+        {
+            if (this.Overlay == null) return;
+            SavePositionAndSize();
+            var old = this.Overlay;
+            // Others (e.g. OverlayZCorrector's timer) must not see the old window being disposed.
+            this.Overlay = null;
+            try
+            {
+                old.Close();
+                old.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Error, "RecreateOverlay: {0}", ex);
+            }
+            InitializeOverlay();
+            if (this.Overlay != null)
+                OnOverlayRecreated();
+        }
+
+        // Fork: sets up a window made by RecreateOverlay as the constructor set up the first one.
+        protected virtual void OnOverlayRecreated()
+        {
+        }
 
         // Fork: with MatchRefreshRate, render at 1.5x the refresh rate of the overlay's monitor.
         // CEF's offscreen frames aren't synchronized with the display and arrive with some jitter,

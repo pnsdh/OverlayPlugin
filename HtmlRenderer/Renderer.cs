@@ -26,6 +26,10 @@ namespace RainbowMage.HtmlRenderer
         // DirectComposition (see DCompPresenter).  Set by Initialize.
         public static bool SharedTextures { get; private set; } = false;
         public static string SharedTextureError { get; private set; } = null;
+        // Fork: overlays can be drawn by Edge WebView2 instead (see WebView2Browser).  Set by
+        // InitializeWebView2: the runtime's version, or why it can't be used.
+        public static bool WebView2Available { get; private set; } = false;
+        public static string WebView2Status { get; private set; } = null;
         // Set when this renderer's shared textures failed (e.g. CEF's GPU differs from ours), so
         // its browser is recreated with CPU frames.
         private bool sharedTexturesFailed = false;
@@ -53,20 +57,31 @@ namespace RainbowMage.HtmlRenderer
         private string overlayUuid;
         public Region DraggableRegion;
 
-        public Renderer(string overlayName, string overlayUuid, string url, IRenderTarget target, object api)
+        // Fork: set when this overlay is drawn by WebView2; every method below then goes to _wv
+        // instead of CEF.
+        private readonly bool _useWebView2;
+        private WebView2Browser _wv;
+        private double _zoomLevel;
+        private bool _muted;
+
+        public Renderer(string overlayName, string overlayUuid, string url, IRenderTarget target, object api, bool useWebView2 = false)
         {
             this.overlayName = overlayName;
             this.overlayUuid = overlayUuid;
             this._target = target;
             this.lastUrl = url;
             this._api = api;
+            this._useWebView2 = useWebView2 && WebView2Available && target is Form;
 
             InitBrowser();
         }
 
+        public bool UsesWebView2 => _useWebView2;
+
         public void InitBrowser()
         {
-            if (noMoreRenders) return;
+            if (noMoreRenders || _useWebView2) return;
+            EnsureCef();
 
             this._browser = new BrowserWrapper(lastUrl ?? "about:blank", automaticallyCreateBrowser: false, target: _target);
             _browser.RequestHandler = new CustomRequestHandler(this);
@@ -181,6 +196,12 @@ namespace RainbowMage.HtmlRenderer
 
         public void Load(string url)
         {
+            if (_useWebView2)
+            {
+                lastUrl = url;
+                _wv?.Load(url);
+                return;
+            }
             if (this._browser != null && _browser.IsBrowserInitialized)
             {
                 this._browser.Load(url);
@@ -207,6 +228,15 @@ namespace RainbowMage.HtmlRenderer
             if (noMoreRenders) return;
 
             EndRender();
+            if (_useWebView2)
+            {
+                _wv = new WebView2Browser(this, (Form)_target, lastUrl, _api, overlayName, overlayUuid, _ctxMenuCallback, _zoomLevel, _muted);
+                foreach (var script in this.scriptQueue)
+                    _wv.ExecuteScript(script);
+                this.scriptQueue.Clear();
+                _wv.Start();
+                return;
+            }
             InitBrowser();
 
             var cefWindowInfo = CreateWindowInfo();
@@ -230,6 +260,8 @@ namespace RainbowMage.HtmlRenderer
 
         public void EndRender()
         {
+            _wv?.Dispose();
+            _wv = null;
             if (_browser != null && _browser.IsBrowserInitialized)
             {
                 _browser.GetBrowser().CloseBrowser(true);
@@ -249,6 +281,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void Reload()
         {
+            _wv?.Reload();
             if (this._browser != null && _browser.IsBrowserInitialized)
             {
                 this._browser.Reload();
@@ -270,6 +303,8 @@ namespace RainbowMage.HtmlRenderer
 
         public void SetZoomLevel(double zoom)
         {
+            _zoomLevel = zoom;
+            _wv?.SetZoomLevel(zoom);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 this._browser.SetZoomLevel(zoom);
@@ -278,6 +313,8 @@ namespace RainbowMage.HtmlRenderer
 
         public void SetMuted(bool muted)
         {
+            _muted = muted;
+            _wv?.SetMuted(muted);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 this._browser.GetBrowserHost().SetAudioMuted(muted);
@@ -307,6 +344,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void SendMouseMove(int x, int y, MouseButtonType button)
         {
+            _wv?.SendMouseMove(x, y, button);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 var host = this._browser.GetBrowserHost();
@@ -331,6 +369,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void SendMouseLeave()
         {
+            _wv?.SendMouseLeave();
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 this._browser.GetBrowserHost().SendMouseMoveEvent(new MouseEvent(0, 0, 0), true);
@@ -339,6 +378,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void SendMouseUpDown(int x, int y, MouseButtonType button, bool isMouseUp)
         {
+            _wv?.SendMouseUpDown(x, y, button, isMouseUp);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 var host = this._browser.GetBrowserHost();
@@ -367,6 +407,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void SendMouseWheel(int x, int y, int delta, bool isVertical)
         {
+            _wv?.SendMouseWheel(x, y, delta, isVertical);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 var host = this._browser.GetBrowserHost();
@@ -405,6 +446,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void showDevTools(bool firstwindow = true)
         {
+            _wv?.ShowDevTools();
             if (_browser != null && _browser.IsBrowserInitialized)
             {
                 WindowInfo wi = new WindowInfo();
@@ -413,8 +455,25 @@ namespace RainbowMage.HtmlRenderer
             }
         }
 
+        // Fork: see WebView2Browser.ForwardKeyMessage.
+        public void ForwardKeyMessage(int msg, IntPtr wParam, IntPtr lParam)
+        {
+            _wv?.ForwardKeyMessage(msg, wParam, lParam);
+        }
+
+        // Fork: see WebView2Browser.QueryOpaqueAt.
+        public void QueryOpaqueAt(int x, int y, Action<bool> result)
+        {
+            if (_wv != null)
+                _wv.QueryOpaqueAt(x, y, result);
+            else
+                result(false);
+        }
+
         public Bitmap Screenshot()
         {
+            if (_useWebView2)
+                return _wv?.Screenshot();
             if (_browser != null && _browser.IsBrowserInitialized)
             {
                 return _browser.Screenshot();
@@ -437,6 +496,8 @@ namespace RainbowMage.HtmlRenderer
             {
                 if (disposing)
                 {
+                    this._wv?.Dispose();
+                    this._wv = null;
                     this._browser?.Dispose();
                     this._browser = null;
                 }
@@ -445,6 +506,11 @@ namespace RainbowMage.HtmlRenderer
         }
 
         static bool initialized = false;
+        static bool configured = false;
+        private static readonly object cefLock = new object();
+        private static string cefPluginDirectory;
+        private static string cefAppDataDirectory;
+        private static bool cefUseGpu;
         private static string CachePath = null;
 
         // Fork: CEF and its profile live in folders of their own, so switching between this fork
@@ -457,9 +523,11 @@ namespace RainbowMage.HtmlRenderer
         // Delete all folders which don't potentially contain overlay configuration information
         private static readonly string[] CacheFolders = new string[] { "Cache", "Code Cache", "GPUCache" };
 
+        // Fork: CEF starts when the first overlay drawn by it is created (see EnsureCef), so
+        // with every overlay drawn by WebView2 its processes never run.  This only prepares it.
         public static void Initialize(string pluginDirectory, string appDataDirectory, bool reportErrors, bool useGpu = false)
         {
-            if (!initialized)
+            if (!configured)
             {
                 // Fork: remove crash reporter configs even when reports are off (see EnableErrorReports).
                 try
@@ -483,94 +551,181 @@ namespace RainbowMage.HtmlRenderer
                     }
                 }
 
-#if DEBUG
-                var cefPath = Path.Combine(pluginDirectory, "libs");
-#else
-                var cefPath = Path.Combine(appDataDirectory, CefFolderName, Environment.Is64BitProcess ? "x64" : "x86");
-#endif
-
-                var lang = System.Globalization.CultureInfo.CurrentCulture.Name;
-                var langPak = Path.Combine(cefPath, "locales", lang + ".pak");
-
-                // Fall back to en-US if we can't find the current locale.
-                if (!File.Exists(langPak))
-                {
-                    lang = "en-US";
-                }
-
                 CachePath = Path.Combine(appDataDirectory, CacheFolderName);
                 CopyUpstreamProfile(Path.Combine(appDataDirectory, UpstreamCacheFolderName), CachePath);
 
-                var cefSettings = new CefSettings
-                {
-                    WindowlessRenderingEnabled = true,
-                    Locale = lang,
-                    // CEF 120+ locks the root cache path per process and requires the cache path
-                    // to be inside it.
-                    RootCachePath = CachePath,
-                    CachePath = CachePath,
-                    MultiThreadedMessageLoop = true,
-                    LogFile = Path.Combine(appDataDirectory, "OverlayPluginCEF.log"),
-#if DEBUG
-                    LogSeverity = LogSeverity.Info,
-#else
-                    LogSeverity = LogSeverity.Error,
-#endif
-                    BrowserSubprocessPath = Path.Combine(cefPath, "CefSharp.BrowserSubprocess.exe"),
-                };
-
-                try
-                {
-                    File.WriteAllText(cefSettings.LogFile, "");
-                }
-                catch (Exception)
-                {
-                    // Ignore; if we can't open the log, CEF can't do it either which means that we don't have to worry about log size.
-                }
-
-                // Necessary to avoid input lag with a framerate limit below 60.
-                cefSettings.CefCommandLineArgs["enable-begin-frame-scheduling"] = "1";
-
-                // Allow websites to play sound even if the user never interacted with that site (pretty common for our overlays)
-                cefSettings.CefCommandLineArgs["autoplay-policy"] = "no-user-gesture-required";
-
-                // Disable Flash. We don't need it and it can cause issues.
-                cefSettings.CefCommandLineArgs.Remove("enable-system-flash");
-
-                cefSettings.EnableAudio();
-
-                // Fork: Chromium relaunches itself de-elevated when started elevated (CEF 120+), which
-                // makes Cef.Initialize fail inside an ACT that runs as administrator.
-                cefSettings.CefCommandLineArgs["do-not-de-elevate"] = "1";
-
-                // Enables software compositing instead of GPU compositing -> less CPU load but no WebGL
                 // Fork: optional GPU rendering whose frames go straight to the overlay windows as
-                // shared textures (no readback to the CPU).
+                // shared textures (no readback to the CPU).  Set up now: overlay windows read
+                // SharedTextures before their renderer starts CEF.
                 if (useGpu)
                 {
                     string error;
                     SharedTextures = DCompPresenter.Initialize(out error);
                     SharedTextureError = error;
                 }
-                else
-                {
-                    cefSettings.SetOffScreenRenderingBestPerformanceArgs();
-                }
 
-                Cef.Initialize(cefSettings, performDependencyCheck: true, browserProcessHandler: null);
+                cefPluginDirectory = pluginDirectory;
+                cefAppDataDirectory = appDataDirectory;
+                cefUseGpu = useGpu;
+                configured = true;
+            }
+        }
 
+        public static bool CefStarted => initialized;
+
+        private static void EnsureCef()
+        {
+            lock (cefLock)
+            {
+                if (initialized || !configured) return;
+                StartCef(cefPluginDirectory, cefAppDataDirectory, cefUseGpu);
                 initialized = true;
             }
         }
 
+        // Kept apart so that CefSharp (and libcef.dll) only loads when CEF starts.
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static void StartCef(string pluginDirectory, string appDataDirectory, bool useGpu)
+        {
+#if DEBUG
+            var cefPath = Path.Combine(pluginDirectory, "libs");
+#else
+            var cefPath = Path.Combine(appDataDirectory, CefFolderName, Environment.Is64BitProcess ? "x64" : "x86");
+#endif
+
+            var lang = System.Globalization.CultureInfo.CurrentCulture.Name;
+            var langPak = Path.Combine(cefPath, "locales", lang + ".pak");
+
+            // Fall back to en-US if we can't find the current locale.
+            if (!File.Exists(langPak))
+            {
+                lang = "en-US";
+            }
+
+            var cefSettings = new CefSettings
+            {
+                WindowlessRenderingEnabled = true,
+                Locale = lang,
+                // CEF 120+ locks the root cache path per process and requires the cache path
+                // to be inside it.
+                RootCachePath = CachePath,
+                CachePath = CachePath,
+                MultiThreadedMessageLoop = true,
+                LogFile = Path.Combine(appDataDirectory, "OverlayPluginCEF.log"),
+#if DEBUG
+                LogSeverity = LogSeverity.Info,
+#else
+                LogSeverity = LogSeverity.Error,
+#endif
+                BrowserSubprocessPath = Path.Combine(cefPath, "CefSharp.BrowserSubprocess.exe"),
+            };
+
+            try
+            {
+                File.WriteAllText(cefSettings.LogFile, "");
+            }
+            catch (Exception)
+            {
+                // Ignore; if we can't open the log, CEF can't do it either which means that we don't have to worry about log size.
+            }
+
+            // Necessary to avoid input lag with a framerate limit below 60.
+            cefSettings.CefCommandLineArgs["enable-begin-frame-scheduling"] = "1";
+
+            // Allow websites to play sound even if the user never interacted with that site (pretty common for our overlays)
+            cefSettings.CefCommandLineArgs["autoplay-policy"] = "no-user-gesture-required";
+
+            // Disable Flash. We don't need it and it can cause issues.
+            cefSettings.CefCommandLineArgs.Remove("enable-system-flash");
+
+            cefSettings.EnableAudio();
+
+            // Fork: Chromium relaunches itself de-elevated when started elevated (CEF 120+), which
+            // makes Cef.Initialize fail inside an ACT that runs as administrator.
+            cefSettings.CefCommandLineArgs["do-not-de-elevate"] = "1";
+
+            // Enables software compositing instead of GPU compositing -> less CPU load but no WebGL
+            if (!useGpu)
+            {
+                cefSettings.SetOffScreenRenderingBestPerformanceArgs();
+            }
+
+            Cef.Initialize(cefSettings, performDependencyCheck: true, browserProcessHandler: null);
+        }
+
+        // Fork: checks for the WebView2 runtime (part of Windows 10/11 through Edge updates).
+        public static void InitializeWebView2(string pluginDirectory, string appDataDirectory)
+        {
+            var userData = Path.Combine(appDataDirectory, "OverlayPluginWebView2-cbkr");
+            if (CachePath != null)
+                CopyCefStorage(Path.Combine(CachePath, "Default"), Path.Combine(userData, "EBWebView", "Default"));
+            string error;
+            var version = WebView2Browser.Initialize(
+                Path.Combine(pluginDirectory, "libs", "runtimes", Environment.Is64BitProcess ? "win-x64" : "win-x86", "native"),
+                userData,
+                out error);
+            WebView2Available = version != null;
+            WebView2Status = version ?? error;
+        }
+
+        // Fork: events from WebView2Browser, raised as the CEF handlers above raise them.
+        internal void RaiseStartLoading(string url)
+        {
+            lastUrl = url;
+            try
+            {
+                BrowserStartLoading?.Invoke(this, new BrowserLoadEventArgs(0, url));
+            }
+            catch (Exception ex)
+            {
+                BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(ex.ToString(), "", 1));
+            }
+        }
+
+        internal void RaiseLoad(int httpStatusCode, string url)
+        {
+            try
+            {
+                BrowserLoad?.Invoke(this, new BrowserLoadEventArgs(httpStatusCode, url));
+            }
+            catch (Exception ex)
+            {
+                BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(ex.ToString(), "", 1));
+            }
+        }
+
+        internal void RaiseError(string errorCode, string errorText, string url)
+        {
+            try
+            {
+                BrowserError?.Invoke(this, new BrowserErrorEventArgs(errorCode, errorText, url));
+            }
+            catch (Exception ex)
+            {
+                BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(ex.ToString(), "", 1));
+            }
+        }
+
+        internal void RaiseConsoleLog(string message, string source, int line)
+        {
+            BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(message, source, line));
+        }
+
+        // True when nothing holds CEF's files anymore (see ClearCache).
         public static bool Shutdown()
         {
             if (initialized)
             {
-                Cef.Shutdown();
+                ShutdownCef();
                 return true;
             }
-            return false;
+            return configured;
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        private static void ShutdownCef()
+        {
+            Cef.Shutdown();
         }
 
         public static void EnableErrorReports(string appDataDirectory)
@@ -647,6 +802,43 @@ MaxUploadsPerDay=0
             }
         }
 
+        // Fork: WebView2 keeps a profile of its own.  Before it exists, it starts with the pages'
+        // data from the CEF profile (local storage and IndexedDB, where overlays such as MopiMopi
+        // keep their settings), as the CEF profile started with upstream's.  CEF hasn't opened
+        // them yet: no overlay exists at this point.
+        private static void CopyCefStorage(string from, string to)
+        {
+            if (Directory.Exists(to) || !Directory.Exists(from))
+                return;
+
+            var tmp = to + ".tmp";
+            try
+            {
+                if (Directory.Exists(tmp))
+                    Directory.Delete(tmp, true);
+                Directory.CreateDirectory(tmp);
+                foreach (var name in new[] { "Local Storage", "IndexedDB" })
+                {
+                    var dir = Path.Combine(from, name);
+                    if (Directory.Exists(dir))
+                        CopyDirectory(dir, Path.Combine(tmp, name), false);
+                }
+                Directory.Move(tmp, to);
+            }
+            catch (Exception)
+            {
+                // Start with empty storage instead.
+                try
+                {
+                    if (Directory.Exists(tmp))
+                        Directory.Delete(tmp, true);
+                }
+                catch (Exception)
+                {
+                }
+            }
+        }
+
         private static void CopyDirectory(string from, string to, bool isRoot)
         {
             Directory.CreateDirectory(to);
@@ -701,6 +893,14 @@ MaxUploadsPerDay=0
 
         public void ExecuteScript(string script)
         {
+            if (_useWebView2)
+            {
+                if (_wv != null)
+                    _wv.ExecuteScript(script);
+                else
+                    this.scriptQueue.Add(script);
+                return;
+            }
             if (_browser != null && _browser.IsBrowserInitialized)
             {
                 _browser.GetMainFrame().ExecuteJavaScriptAsync(script, "injected");
@@ -716,6 +916,12 @@ MaxUploadsPerDay=0
 
         public static void ExecuteCallback(object callback, object param)
         {
+            var scriptCallback = callback as IScriptCallback;
+            if (scriptCallback != null)
+            {
+                scriptCallback.Invoke(param);
+                return;
+            }
             if (callback.GetType().GetInterface("IJavascriptCallback") == null)
             {
                 throw new Exception("Invalid parameter passed for callback!");
@@ -738,8 +944,13 @@ MaxUploadsPerDay=0
         public string ErrorText { get; private set; }
         public string Url { get; private set; }
         public BrowserErrorEventArgs(CefErrorCode errorCode, string errorText, string url)
+            : this(errorCode.ToString(), errorText, url)
         {
-            this.ErrorCode = errorCode.ToString();
+        }
+
+        public BrowserErrorEventArgs(string errorCode, string errorText, string url)
+        {
+            this.ErrorCode = errorCode;
             this.ErrorText = errorText;
             this.Url = url;
         }

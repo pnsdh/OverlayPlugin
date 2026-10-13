@@ -112,6 +112,27 @@ namespace RainbowMage.OverlayPlugin
             }
         }
 
+        // Fork: draw this overlay with Edge WebView2 instead of CEF (see
+        // HtmlRenderer.WebView2Browser).  Changing it replaces the overlay's window.
+        public event EventHandler UseWebView2Changed;
+
+        private bool useWebView2;
+        public bool UseWebView2
+        {
+            get
+            {
+                return this.useWebView2;
+            }
+            set
+            {
+                if (this.useWebView2 != value)
+                {
+                    this.useWebView2 = value;
+                    UseWebView2Changed?.Invoke(this, EventArgs.Empty);
+                }
+            }
+        }
+
         // Fork: render at 1.5x the refresh rate of the overlay's monitor instead of MaxFrameRate
         // (see OverlayBase.ApplyFrameRate).
         public event EventHandler MatchRefreshRateChanged;
