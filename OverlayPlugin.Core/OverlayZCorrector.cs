@@ -44,7 +44,9 @@ namespace RainbowMage.OverlayPlugin
 
         public void DeInit()
         {
-            timer.Change(0, -1);
+            // Fork: a due time of 0 would run the check once more right away, while ACT closes and
+            // disposes the overlays.
+            timer.Change(Timeout.Infinite, Timeout.Infinite);
         }
 
         private void UpdateFFXIVProcess(Process p)
@@ -72,6 +74,9 @@ namespace RainbowMage.OverlayPlugin
 
             foreach (var overlay in main.Overlays)
             {
+                // Fork: Handle is zero for an overlay without a window (closing or being replaced).
+                if (overlay.Handle == IntPtr.Zero)
+                    continue;
                 if (!overlayWindows.Contains(overlay.Handle))
                 {
                     // The overlay is behind the game. Let's fix that.

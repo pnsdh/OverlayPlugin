@@ -48,7 +48,8 @@ namespace RainbowMage.OverlayPlugin
         // See https://learn.microsoft.com/en-us/dotnet/fundamentals/code-analysis/quality-rules/ca1033
 #pragma warning disable CA1033
         IOverlayConfig IOverlay.Config { get => Config; set => Config = (TConfig)value; }
-        IntPtr IOverlay.Handle { get => Overlay == null ? IntPtr.Zero : Overlay.Handle; }
+        // Fork: zero rather than an exception once the window is disposed (e.g. while ACT closes).
+        IntPtr IOverlay.Handle { get => Overlay == null || Overlay.IsDisposed || !Overlay.IsHandleCreated ? IntPtr.Zero : Overlay.Handle; }
 #pragma warning restore CA1033
 
         public bool Visible
@@ -408,6 +409,8 @@ namespace RainbowMage.OverlayPlugin
             if (this.Overlay == null) return;
             SavePositionAndSize();
             var old = this.Overlay;
+            // Others (e.g. OverlayZCorrector's timer) must not see the old window being disposed.
+            this.Overlay = null;
             try
             {
                 old.Close();
