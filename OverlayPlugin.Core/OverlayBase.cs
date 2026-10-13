@@ -304,6 +304,7 @@ namespace RainbowMage.OverlayPlugin
             };
             this.Config.MaxFrameRateChanged += (o, e) => ApplyFrameRate();
             this.Config.MatchRefreshRateChanged += (o, e) => ApplyFrameRate();
+            this.Config.UseWebView2Changed += (o, e) => RecreateOverlay();
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             this.Config.GlobalHotkeyChanged += (o, e) => UpdateHotKey();
             this.Config.UrlChanged += (o, e) =>
@@ -399,6 +400,32 @@ namespace RainbowMage.OverlayPlugin
             Log(level, string.Format(format, args));
         }
 
+
+        // Fork: replaces the overlay's window with a new one, to switch its renderer
+        // (UseWebView2) without restarting ACT.
+        protected void RecreateOverlay()
+        {
+            if (this.Overlay == null) return;
+            SavePositionAndSize();
+            var old = this.Overlay;
+            try
+            {
+                old.Close();
+                old.Dispose();
+            }
+            catch (Exception ex)
+            {
+                Log(LogLevel.Error, "RecreateOverlay: {0}", ex);
+            }
+            InitializeOverlay();
+            if (this.Overlay != null)
+                OnOverlayRecreated();
+        }
+
+        // Fork: sets up a window made by RecreateOverlay as the constructor set up the first one.
+        protected virtual void OnOverlayRecreated()
+        {
+        }
 
         // Fork: with MatchRefreshRate, render at 1.5x the refresh rate of the overlay's monitor.
         // CEF's offscreen frames aren't synchronized with the display and arrive with some jitter,

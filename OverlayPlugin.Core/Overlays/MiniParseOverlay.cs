@@ -81,20 +81,32 @@ namespace RainbowMage.OverlayPlugin.Overlays
                 container.Resolve<OverlayHider>().UpdateOverlays();
             };
 
-            if (Config.MuteWhenHidden && !Config.IsVisible)
-            {
-                Overlay.Renderer.SetMuted(true);
-            }
-
             if (Config.HideOutOfCombat)
             {
                 // Assume that we're not in combat when ACT starts.
                 Overlay.Visible = false;
             }
 
+            SetUpOverlayWindow();
+        }
+
+        private void SetUpOverlayWindow()
+        {
+            if (Config.MuteWhenHidden && !Config.IsVisible)
+            {
+                Overlay.Renderer.SetMuted(true);
+            }
+
             Overlay.Renderer.BrowserStartLoading += PrepareWebsite;
             Overlay.Renderer.BrowserLoad += FinishLoading;
             Overlay.Renderer.BrowserConsoleLog += Renderer_BrowserConsoleLog;
+        }
+
+        // Fork: see OverlayBase.RecreateOverlay.
+        protected override void OnOverlayRecreated()
+        {
+            SetUpOverlayWindow();
+            container.Resolve<OverlayHider>().UpdateOverlays();
         }
 
         protected override void Dispose(bool disposing)
