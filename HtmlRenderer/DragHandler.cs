@@ -22,7 +22,20 @@ namespace RainbowMage.HtmlRenderer
 
         public void OnDraggableRegionsChanged(IWebBrowser chromiumWebBrowser, IBrowser browser, IFrame frame, IList<DraggableRegion> regions)
         {
-            if (!frame.IsMain) return;
+            // Fork: an exception thrown back into CEF ends ACT (seen as a NullReferenceException
+            // here while an overlay page loaded at ACT's start).
+            try
+            {
+                UpdateRegion(frame, regions);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        private void UpdateRegion(IFrame frame, IList<DraggableRegion> regions)
+        {
+            if (frame == null || regions == null || !frame.IsValid || !frame.IsMain) return;
 
             var region = new Region();
             region.MakeEmpty();
