@@ -217,6 +217,13 @@ namespace RainbowMage.HtmlRenderer
   };
   document.addEventListener('focusin', update, true);
   document.addEventListener('focusout', () => setTimeout(update, 0), true);
+  // Back from another window, a click on the field that still has the page's focus brings no
+  // focusin: every press on a text field asks again.
+  document.addEventListener('mousedown', (e) => {
+    if (!isText(e.target)) return;
+    typing = true;
+    window.chrome.webview.postMessage({ typing: true });
+  }, true);
 })();";
 
         private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
