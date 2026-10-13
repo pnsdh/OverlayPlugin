@@ -173,7 +173,9 @@ namespace RainbowMage.OverlayPlugin
 
                 this.Overlay.Visible = this.Config.IsVisible;
                 this.Overlay.Locked = this.Config.IsLocked;
-                this.Overlay.MaxFrameRate = this.Config.MaxFrameRate;
+                ApplyFrameRate();
+                // Moving to another monitor can change its refresh rate.
+                this.Overlay.Move += (o, e) => ApplyFrameRate();
             }
             catch (Exception ex)
             {
@@ -293,10 +295,9 @@ namespace RainbowMage.OverlayPlugin
                 if (this.Overlay != null) this.Overlay.Locked = e.IsLocked;
                 NotifyOverlayState();
             };
-            this.Config.MaxFrameRateChanged += (o, e) =>
-            {
-                if (this.Overlay != null) this.Overlay.MaxFrameRate = this.Config.MaxFrameRate;
-            };
+            this.Config.MaxFrameRateChanged += (o, e) => ApplyFrameRate();
+            this.Config.MatchRefreshRateChanged += (o, e) => ApplyFrameRate();
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplaySettingsChanged;
             this.Config.GlobalHotkeyChanged += (o, e) => UpdateHotKey();
             this.Config.UrlChanged += (o, e) =>
             {
@@ -335,6 +336,7 @@ namespace RainbowMage.OverlayPlugin
 
                     timer?.Stop();
                     timer?.Dispose();
+                    Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
 
                     Overlay?.Close();
                     Overlay?.Dispose();
@@ -390,6 +392,25 @@ namespace RainbowMage.OverlayPlugin
             Log(level, string.Format(format, args));
         }
 
+
+        // Fork: with MatchRefreshRate, render at 1.5x the refresh rate of the overlay's monitor.
+        // CEF's offscreen frames aren't synchronized with the display and arrive with some jitter,
+        // so at exactly the refresh rate some refreshes get no new frame (a visible hitch); with
+        // headroom nearly every refresh has a fresh one, and the extra frames are dropped.
+        private void ApplyFrameRate()
+        {
+            if (this.Overlay == null) return;
+            var fps = this.Config.MatchRefreshRate ? Util.GetRefreshRate(this.Overlay) * 3 / 2 : this.Config.MaxFrameRate;
+            if (this.Overlay.MaxFrameRate != fps)
+                this.Overlay.MaxFrameRate = fps;
+        }
+
+        private void OnDisplaySettingsChanged(object sender, EventArgs e)
+        {
+            var overlay = this.Overlay;
+            if (overlay != null && overlay.IsHandleCreated)
+                overlay.BeginInvoke((Action)ApplyFrameRate);
+        }
 
         public void SavePositionAndSize()
         {

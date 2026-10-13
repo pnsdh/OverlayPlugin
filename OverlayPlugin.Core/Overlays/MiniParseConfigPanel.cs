@@ -51,6 +51,7 @@ namespace RainbowMage.OverlayPlugin.Overlays
             this.checkNoFocus.Visible = config.ActwsCompatibility;
             this.checkNoFocus.Checked = config.NoFocus;
             this.nudMaxFrameRate.Value = config.MaxFrameRate;
+            SetupRefreshRateOption();
             this.checkLogConsoleMessages.Checked = config.LogConsoleMessages;
             this.tbZoom.Value = config.Zoom;
             this.cbWhiteBg.Checked = config.ForceWhiteBackground;
@@ -190,6 +191,30 @@ namespace RainbowMage.OverlayPlugin.Overlays
         private void textMiniParseUrl_Leave(object sender, EventArgs e)
         {
             this.config.Url = textMiniParseUrl.Text;
+        }
+
+        // Fork: the frame rate can follow the monitor instead (see OverlayBase.ApplyFrameRate).
+        private void SetupRefreshRateOption()
+        {
+            var ko = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
+            nudMaxFrameRate.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            nudMaxFrameRate.Width = 80;
+            var cbMatchRefreshRate = new CheckBox
+            {
+                Name = "cbMatchRefreshRate",
+                Text = ko ? "모니터에 맞춤 (주사율의 1.5배로 그려 끊김 없이)" : "Match the monitor (1.5x its refresh rate, for smooth motion)",
+                Location = new Point(nudMaxFrameRate.Right + 12, nudMaxFrameRate.Top + 1),
+                AutoSize = true,
+                UseVisualStyleBackColor = true,
+                Checked = config.MatchRefreshRate,
+            };
+            nudMaxFrameRate.Enabled = !cbMatchRefreshRate.Checked;
+            cbMatchRefreshRate.CheckedChanged += (o, e) =>
+            {
+                config.MatchRefreshRate = cbMatchRefreshRate.Checked;
+                nudMaxFrameRate.Enabled = !cbMatchRefreshRate.Checked;
+            };
+            tabAdvanced.Controls.Add(cbMatchRefreshRate);
         }
 
         private void nudMaxFrameRate_ValueChanged(object sender, EventArgs e)

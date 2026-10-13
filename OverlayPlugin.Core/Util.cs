@@ -60,6 +60,57 @@ namespace RainbowMage.OverlayPlugin
             return false;
         }
 
+        // Fork: the refresh rate of the monitor that shows most of the form, or 60 if unknown.
+        public static int GetRefreshRate(Form form)
+        {
+            var mode = new DEVMODE { dmSize = (short)Marshal.SizeOf(typeof(DEVMODE)) };
+            if (EnumDisplaySettings(Screen.FromControl(form).DeviceName, ENUM_CURRENT_SETTINGS, ref mode) && mode.dmDisplayFrequency > 1)
+                return mode.dmDisplayFrequency;
+            return 60;
+        }
+
+        private const int ENUM_CURRENT_SETTINGS = -1;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern bool EnumDisplaySettings(string deviceName, int modeNum, ref DEVMODE devMode);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct DEVMODE
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string dmDeviceName;
+            public short dmSpecVersion;
+            public short dmDriverVersion;
+            public short dmSize;
+            public short dmDriverExtra;
+            public int dmFields;
+            public int dmPositionX;
+            public int dmPositionY;
+            public int dmDisplayOrientation;
+            public int dmDisplayFixedOutput;
+            public short dmColor;
+            public short dmDuplex;
+            public short dmYResolution;
+            public short dmTTOption;
+            public short dmCollate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string dmFormName;
+            public short dmLogPixels;
+            public int dmBitsPerPel;
+            public int dmPelsWidth;
+            public int dmPelsHeight;
+            public int dmDisplayFlags;
+            public int dmDisplayFrequency;
+            public int dmICMMethod;
+            public int dmICMIntent;
+            public int dmMediaType;
+            public int dmDitherType;
+            public int dmReserved1;
+            public int dmReserved2;
+            public int dmPanningWidth;
+            public int dmPanningHeight;
+        }
+
         /// <summary>
         /// 指定されたフォームを Windows の Alt+Tab の切り替え候補から除外します。
         /// </summary>
