@@ -224,6 +224,33 @@ namespace RainbowMage.HtmlRenderer
     typing = true;
     window.chrome.webview.postMessage({ typing: true });
   }, true);
+  // When the window loses the focus, the IME cancels the text being composed (e.g. the last
+  // Hangul syllable) instead of committing it, just before the blur: put it back if a blur
+  // follows.  Deleting it (Backspace) also ends with nothing, but no blur follows.
+  let composed = null;
+  let cancelled = null;
+  document.addEventListener('compositionstart', () => { composed = null; }, true);
+  document.addEventListener('compositionupdate', (e) => {
+    if (e.data) composed = { el: e.target, text: e.data };
+  }, true);
+  document.addEventListener('compositionend', (e) => {
+    cancelled = !e.data && composed ? composed : null;
+    composed = null;
+    if (cancelled) {
+      const mine = cancelled;
+      setTimeout(() => { if (cancelled === mine) cancelled = null; }, 200);
+    }
+  }, true);
+  const restore = () => {
+    const lost = cancelled;
+    cancelled = null;
+    if (!lost || typeof lost.el.setRangeText !== 'function') return;
+    const at = lost.el.selectionStart === null ? lost.el.value.length : lost.el.selectionStart;
+    lost.el.setRangeText(lost.text, at, at, 'end');
+    lost.el.dispatchEvent(new InputEvent('input', { bubbles: true, data: lost.text, inputType: 'insertText' }));
+  };
+  document.addEventListener('focusout', restore, true);
+  window.addEventListener('blur', restore);
 })();";
 
         private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
@@ -598,8 +625,10 @@ namespace RainbowMage.HtmlRenderer
         [DllImport("user32.dll")]
         private static extern bool IsWindow(IntPtr hwnd);
 
-        [DllImport("user32.dll")]
+        // The Unicode one: characters such as Hangul don't fit the ANSI one's code page.
+        [DllImport("user32.dll", EntryPoint = "PostMessageW")]
         private static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+
 
         // Overlays don't take the focus from the game (WS_EX_NOACTIVATE) unless set to.  While a
         // text field of the page has the focus, the window takes it anyway so typing works; when
