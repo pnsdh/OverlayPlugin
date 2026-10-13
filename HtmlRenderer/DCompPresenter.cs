@@ -96,7 +96,8 @@ namespace RainbowMage.HtmlRenderer
                     copyDone = copyDone ?? new D3D11.Query(device, new D3D11.QueryDescription { Type = D3D11.QueryType.Event });
                     ctx.End(copyDone);
                     ctx.Flush();
-                    while (!ctx.GetData(copyDone, D3D11.AsynchronousFlags.None, out bool done) || !done)
+                    // The query answers a 4-byte BOOL: GetData<bool> asks for 1 byte and never succeeds.
+                    while (!ctx.GetData(copyDone, D3D11.AsynchronousFlags.None, out int done) || done == 0)
                         System.Threading.Thread.Yield();
                 }
                 swapChain.Present(0, DXGI.PresentFlags.None);
