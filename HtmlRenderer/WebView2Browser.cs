@@ -478,10 +478,12 @@ namespace RainbowMage.HtmlRenderer
             return done.Task.Wait(5000) ? done.Task.Result : null;
         }
 
+        // isVertical is what Renderer.SendMouseWheel gets: true when Shift is held, which CEF turns
+        // into horizontal scrolling (its first delta).
         public void SendMouseWheel(int x, int y, int delta, bool isVertical)
         {
-            SendMouse(isVertical ? CoreWebView2MouseEventKind.Wheel : CoreWebView2MouseEventKind.HorizontalWheel,
-                x, y, CoreWebView2MouseEventVirtualKeys.None, (uint)delta);
+            SendMouse(isVertical ? CoreWebView2MouseEventKind.HorizontalWheel : CoreWebView2MouseEventKind.Wheel,
+                x, y, CoreWebView2MouseEventVirtualKeys.None, unchecked((uint)delta));
         }
 
         private static CoreWebView2MouseEventVirtualKeys ButtonKeys(MouseButtonType button, bool down)
