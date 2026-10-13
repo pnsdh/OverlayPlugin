@@ -143,12 +143,14 @@ namespace RainbowMage.HtmlRenderer
                 core.ProcessFailed += OnProcessFailed;
                 controller.CursorChanged += OnCursorChanged;
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(ApiScript());
+                await core.AddScriptToExecuteOnDocumentCreatedAsync(TypingScript);
                 await ForwardConsole(core);
                 if (disposed) return;
 
                 form.Resize += OnFormResize;
                 form.VisibleChanged += OnFormVisibleChanged;
                 form.Activated += OnFormActivated;
+                form.Deactivate += OnFormDeactivate;
                 core.Navigate(url);
             }
             catch (Exception ex)
@@ -201,6 +203,22 @@ namespace RainbowMage.HtmlRenderer
 })();";
         }
 
+        // Tells when a text field of the page gets or loses the focus (see OnTyping).
+        private const string TypingScript = @"(() => {
+  const textTypes = ['text', 'search', 'url', 'tel', 'email', 'password', 'number', 'date', 'time', 'datetime-local', 'month', 'week'];
+  const isText = (el) => !!el && (el.isContentEditable || el.tagName === 'TEXTAREA' ||
+    (el.tagName === 'INPUT' && textTypes.includes(el.type || 'text')));
+  let typing = false;
+  const update = () => {
+    const now = isText(document.activeElement);
+    if (now === typing) return;
+    typing = now;
+    window.chrome.webview.postMessage({ typing: now });
+  };
+  document.addEventListener('focusin', update, true);
+  document.addEventListener('focusout', () => setTimeout(update, 0), true);
+})();";
+
         private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
             JObject message;
@@ -210,6 +228,11 @@ namespace RainbowMage.HtmlRenderer
             }
             catch (JsonException)
             {
+                return;
+            }
+            if (message["typing"] != null)
+            {
+                OnTyping((bool)message["typing"]);
                 return;
             }
             MethodInfo method;
@@ -571,6 +594,66 @@ namespace RainbowMage.HtmlRenderer
         [DllImport("user32.dll")]
         private static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
 
+        // Overlays don't take the focus from the game (WS_EX_NOACTIVATE) unless set to.  While a
+        // text field of the page has the focus, the window takes it anyway so typing works; when
+        // the field loses it, the window that had the focus before (the game) gets it back.
+        private IntPtr focusTakenFrom;
+        private bool tookFocus;
+
+        private void OnTyping(bool typing)
+        {
+            if (!form.IsHandleCreated) return;
+            if (typing)
+            {
+                var exStyle = GetWindowLong(form.Handle, GWL_EXSTYLE);
+                if ((exStyle & WS_EX_NOACTIVATE) == 0 && Form.ActiveForm == form) return;
+                var foreground = GetForegroundWindow();
+                focusTakenFrom = foreground != form.Handle ? foreground : IntPtr.Zero;
+                tookFocus = (exStyle & WS_EX_NOACTIVATE) != 0;
+                if (tookFocus)
+                    SetWindowLong(form.Handle, GWL_EXSTYLE, exStyle & ~WS_EX_NOACTIVATE);
+                // Allowed: the click on the field was this process' input.
+                SetForegroundWindow(form.Handle);
+                controller?.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
+            }
+            else
+            {
+                ReturnFocus(true);
+            }
+        }
+
+        private void ReturnFocus(bool toPrevious)
+        {
+            if (!tookFocus) return;
+            tookFocus = false;
+            var exStyle = GetWindowLong(form.Handle, GWL_EXSTYLE);
+            SetWindowLong(form.Handle, GWL_EXSTYLE, exStyle | WS_EX_NOACTIVATE);
+            if (toPrevious && focusTakenFrom != IntPtr.Zero && GetForegroundWindow() == form.Handle)
+                SetForegroundWindow(focusTakenFrom);
+            focusTakenFrom = IntPtr.Zero;
+        }
+
+        // The user went to another window (e.g. clicked the game): only stop taking the focus.
+        private void OnFormDeactivate(object sender, EventArgs e)
+        {
+            ReturnFocus(false);
+        }
+
+        private const int GWL_EXSTYLE = -20;
+        private const int WS_EX_NOACTIVATE = 0x08000000;
+
+        [DllImport("user32.dll")]
+        private static extern int GetWindowLong(IntPtr hwnd, int index);
+
+        [DllImport("user32.dll")]
+        private static extern int SetWindowLong(IntPtr hwnd, int index, int value);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hwnd);
+
         // An overlay that takes the focus gives it to the page, for keyboard input.
         private void OnFormActivated(object sender, EventArgs e)
         {
@@ -667,6 +750,7 @@ namespace RainbowMage.HtmlRenderer
             form.Resize -= OnFormResize;
             form.VisibleChanged -= OnFormVisibleChanged;
             form.Activated -= OnFormActivated;
+            form.Deactivate -= OnFormDeactivate;
             try
             {
                 controller?.Close();
