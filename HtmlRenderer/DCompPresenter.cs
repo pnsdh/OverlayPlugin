@@ -20,6 +20,8 @@ namespace RainbowMage.HtmlRenderer
         private static D3D11.Device device;
         private static D3D11.Device1 device1;
         private static DComp.Device dcomp;
+        // Signals when the copies out of CEF's shared texture are done (see PresentShared).
+        private static D3D11.Query copyDone;
 
         private DComp.Target target;
         private DComp.Visual visual;
@@ -79,15 +81,23 @@ namespace RainbowMage.HtmlRenderer
             lock (deviceLock)
             {
                 if (disposed) return;
+                var ctx = device.ImmediateContext;
                 using (var texture = device1.OpenSharedResource1<D3D11.Texture2D>(sharedHandle))
                 {
                     var desc = texture.Description;
                     EnsureSize(desc.Width, desc.Height);
                     using (var back = swapChain.GetBackBuffer<D3D11.Texture2D>(0))
                     {
-                        device.ImmediateContext.CopyResource(texture, back);
-                        device.ImmediateContext.CopyResource(texture, lastFrame);
+                        ctx.CopyResource(texture, back);
+                        ctx.CopyResource(texture, lastFrame);
                     }
+                    // CEF reuses the texture for a later frame as soon as OnAcceleratedPaint
+                    // returns, so wait until the GPU has copied it (well under a millisecond).
+                    copyDone = copyDone ?? new D3D11.Query(device, new D3D11.QueryDescription { Type = D3D11.QueryType.Event });
+                    ctx.End(copyDone);
+                    ctx.Flush();
+                    while (!ctx.GetData(copyDone, D3D11.AsynchronousFlags.None, out bool done) || !done)
+                        System.Threading.Thread.Yield();
                 }
                 swapChain.Present(0, DXGI.PresentFlags.None);
             }
