@@ -523,6 +523,52 @@ namespace RainbowMage.HtmlRenderer
             }
         }
 
+        // WebView2 reads keys from a window it puts in the overlay's window.  Keys that reach the
+        // overlay's window instead (it has the focus, not WebView2's) are passed on to it, as CEF
+        // gets them from Renderer.SendKeyEvent.
+        public void ForwardKeyMessage(int msg, IntPtr wParam, IntPtr lParam)
+        {
+            var input = FindInputWindow();
+            if (input != IntPtr.Zero)
+                PostMessage(input, msg, wParam, lParam);
+        }
+
+        private IntPtr inputWindow;
+
+        private IntPtr FindInputWindow()
+        {
+            if (inputWindow != IntPtr.Zero && IsWindow(inputWindow))
+                return inputWindow;
+            inputWindow = IntPtr.Zero;
+            if (!form.IsHandleCreated) return IntPtr.Zero;
+            EnumChildWindows(form.Handle, (hwnd, param) =>
+            {
+                var name = new StringBuilder(64);
+                GetClassName(hwnd, name, name.Capacity);
+                if (name.ToString().StartsWith("Chrome_WidgetWin"))
+                {
+                    inputWindow = hwnd;
+                    return false;
+                }
+                return true;
+            }, IntPtr.Zero);
+            return inputWindow;
+        }
+
+        private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr param);
+
+        [DllImport("user32.dll")]
+        private static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc callback, IntPtr param);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr hwnd, StringBuilder name, int size);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsWindow(IntPtr hwnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+
         // An overlay that takes the focus gives it to the page, for keyboard input.
         private void OnFormActivated(object sender, EventArgs e)
         {

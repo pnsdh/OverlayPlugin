@@ -454,6 +454,12 @@ namespace RainbowMage.HtmlRenderer
             }
         }
 
+        // Fork: see WebView2Browser.ForwardKeyMessage.
+        public void ForwardKeyMessage(int msg, IntPtr wParam, IntPtr lParam)
+        {
+            _wv?.ForwardKeyMessage(msg, wParam, lParam);
+        }
+
         // Fork: see WebView2Browser.QueryOpaqueAt.
         public void QueryOpaqueAt(int x, int y, Action<bool> result)
         {

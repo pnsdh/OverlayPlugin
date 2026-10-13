@@ -161,6 +161,13 @@ namespace RainbowMage.HtmlRenderer
 
         public void OnKeyEvent(ref Message m)
         {
+            // Fork: WebView2 reads keys from a window of its own (see WebView2Browser).
+            if (UsesWebView2)
+            {
+                ForwardKeyMessage(m.Msg, m.WParam, m.LParam);
+                return;
+            }
+
             var keyEvent = new KeyEvent();
             keyEvent.WindowsKeyCode = m.WParam.ToInt32();
             keyEvent.NativeKeyCode = (int)m.LParam.ToInt64();
