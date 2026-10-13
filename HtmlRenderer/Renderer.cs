@@ -26,6 +26,10 @@ namespace RainbowMage.HtmlRenderer
         // DirectComposition (see DCompPresenter).  Set by Initialize.
         public static bool SharedTextures { get; private set; } = false;
         public static string SharedTextureError { get; private set; } = null;
+        // Fork: overlays can be drawn by Edge WebView2 instead (see WebView2Browser).  Set by
+        // InitializeWebView2: the runtime's version, or why it can't be used.
+        public static bool WebView2Available { get; private set; } = false;
+        public static string WebView2Status { get; private set; } = null;
         // Set when this renderer's shared textures failed (e.g. CEF's GPU differs from ours), so
         // its browser is recreated with CPU frames.
         private bool sharedTexturesFailed = false;
@@ -53,20 +57,30 @@ namespace RainbowMage.HtmlRenderer
         private string overlayUuid;
         public Region DraggableRegion;
 
-        public Renderer(string overlayName, string overlayUuid, string url, IRenderTarget target, object api)
+        // Fork: set when this overlay is drawn by WebView2; every method below then goes to _wv
+        // instead of CEF.
+        private readonly bool _useWebView2;
+        private WebView2Browser _wv;
+        private double _zoomLevel;
+        private bool _muted;
+
+        public Renderer(string overlayName, string overlayUuid, string url, IRenderTarget target, object api, bool useWebView2 = false)
         {
             this.overlayName = overlayName;
             this.overlayUuid = overlayUuid;
             this._target = target;
             this.lastUrl = url;
             this._api = api;
+            this._useWebView2 = useWebView2 && WebView2Available && target is Form;
 
             InitBrowser();
         }
 
+        public bool UsesWebView2 => _useWebView2;
+
         public void InitBrowser()
         {
-            if (noMoreRenders) return;
+            if (noMoreRenders || _useWebView2) return;
 
             this._browser = new BrowserWrapper(lastUrl ?? "about:blank", automaticallyCreateBrowser: false, target: _target);
             _browser.RequestHandler = new CustomRequestHandler(this);
@@ -181,6 +195,12 @@ namespace RainbowMage.HtmlRenderer
 
         public void Load(string url)
         {
+            if (_useWebView2)
+            {
+                lastUrl = url;
+                _wv?.Load(url);
+                return;
+            }
             if (this._browser != null && _browser.IsBrowserInitialized)
             {
                 this._browser.Load(url);
@@ -207,6 +227,15 @@ namespace RainbowMage.HtmlRenderer
             if (noMoreRenders) return;
 
             EndRender();
+            if (_useWebView2)
+            {
+                _wv = new WebView2Browser(this, (Form)_target, lastUrl, _api, overlayName, overlayUuid, _ctxMenuCallback, _zoomLevel, _muted);
+                foreach (var script in this.scriptQueue)
+                    _wv.ExecuteScript(script);
+                this.scriptQueue.Clear();
+                _wv.Start();
+                return;
+            }
             InitBrowser();
 
             var cefWindowInfo = CreateWindowInfo();
@@ -230,6 +259,8 @@ namespace RainbowMage.HtmlRenderer
 
         public void EndRender()
         {
+            _wv?.Dispose();
+            _wv = null;
             if (_browser != null && _browser.IsBrowserInitialized)
             {
                 _browser.GetBrowser().CloseBrowser(true);
@@ -249,6 +280,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void Reload()
         {
+            _wv?.Reload();
             if (this._browser != null && _browser.IsBrowserInitialized)
             {
                 this._browser.Reload();
@@ -270,6 +302,8 @@ namespace RainbowMage.HtmlRenderer
 
         public void SetZoomLevel(double zoom)
         {
+            _zoomLevel = zoom;
+            _wv?.SetZoomLevel(zoom);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 this._browser.SetZoomLevel(zoom);
@@ -278,6 +312,8 @@ namespace RainbowMage.HtmlRenderer
 
         public void SetMuted(bool muted)
         {
+            _muted = muted;
+            _wv?.SetMuted(muted);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 this._browser.GetBrowserHost().SetAudioMuted(muted);
@@ -307,6 +343,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void SendMouseMove(int x, int y, MouseButtonType button)
         {
+            _wv?.SendMouseMove(x, y, button);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 var host = this._browser.GetBrowserHost();
@@ -331,6 +368,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void SendMouseLeave()
         {
+            _wv?.SendMouseLeave();
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 this._browser.GetBrowserHost().SendMouseMoveEvent(new MouseEvent(0, 0, 0), true);
@@ -339,6 +377,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void SendMouseUpDown(int x, int y, MouseButtonType button, bool isMouseUp)
         {
+            _wv?.SendMouseUpDown(x, y, button, isMouseUp);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 var host = this._browser.GetBrowserHost();
@@ -367,6 +406,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void SendMouseWheel(int x, int y, int delta, bool isVertical)
         {
+            _wv?.SendMouseWheel(x, y, delta, isVertical);
             if (this._browser != null && this._browser.IsBrowserInitialized)
             {
                 var host = this._browser.GetBrowserHost();
@@ -405,6 +445,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void showDevTools(bool firstwindow = true)
         {
+            _wv?.ShowDevTools();
             if (_browser != null && _browser.IsBrowserInitialized)
             {
                 WindowInfo wi = new WindowInfo();
@@ -437,6 +478,8 @@ namespace RainbowMage.HtmlRenderer
             {
                 if (disposing)
                 {
+                    this._wv?.Dispose();
+                    this._wv = null;
                     this._browser?.Dispose();
                     this._browser = null;
                 }
@@ -561,6 +604,61 @@ namespace RainbowMage.HtmlRenderer
 
                 initialized = true;
             }
+        }
+
+        // Fork: checks for the WebView2 runtime (part of Windows 10/11 through Edge updates).
+        public static void InitializeWebView2(string pluginDirectory, string appDataDirectory)
+        {
+            string error;
+            var version = WebView2Browser.Initialize(
+                Path.Combine(pluginDirectory, "libs", "runtimes", Environment.Is64BitProcess ? "win-x64" : "win-x86", "native"),
+                Path.Combine(appDataDirectory, "OverlayPluginWebView2-cbkr"),
+                out error);
+            WebView2Available = version != null;
+            WebView2Status = version ?? error;
+        }
+
+        // Fork: events from WebView2Browser, raised as the CEF handlers above raise them.
+        internal void RaiseStartLoading(string url)
+        {
+            lastUrl = url;
+            try
+            {
+                BrowserStartLoading?.Invoke(this, new BrowserLoadEventArgs(0, url));
+            }
+            catch (Exception ex)
+            {
+                BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(ex.ToString(), "", 1));
+            }
+        }
+
+        internal void RaiseLoad(int httpStatusCode, string url)
+        {
+            try
+            {
+                BrowserLoad?.Invoke(this, new BrowserLoadEventArgs(httpStatusCode, url));
+            }
+            catch (Exception ex)
+            {
+                BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(ex.ToString(), "", 1));
+            }
+        }
+
+        internal void RaiseError(string errorCode, string errorText, string url)
+        {
+            try
+            {
+                BrowserError?.Invoke(this, new BrowserErrorEventArgs(errorCode, errorText, url));
+            }
+            catch (Exception ex)
+            {
+                BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(ex.ToString(), "", 1));
+            }
+        }
+
+        internal void RaiseConsoleLog(string message, string source, int line)
+        {
+            BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(message, source, line));
         }
 
         public static bool Shutdown()
@@ -701,6 +799,14 @@ MaxUploadsPerDay=0
 
         public void ExecuteScript(string script)
         {
+            if (_useWebView2)
+            {
+                if (_wv != null)
+                    _wv.ExecuteScript(script);
+                else
+                    this.scriptQueue.Add(script);
+                return;
+            }
             if (_browser != null && _browser.IsBrowserInitialized)
             {
                 _browser.GetMainFrame().ExecuteJavaScriptAsync(script, "injected");
@@ -716,6 +822,12 @@ MaxUploadsPerDay=0
 
         public static void ExecuteCallback(object callback, object param)
         {
+            var scriptCallback = callback as IScriptCallback;
+            if (scriptCallback != null)
+            {
+                scriptCallback.Invoke(param);
+                return;
+            }
             if (callback.GetType().GetInterface("IJavascriptCallback") == null)
             {
                 throw new Exception("Invalid parameter passed for callback!");
@@ -738,8 +850,13 @@ MaxUploadsPerDay=0
         public string ErrorText { get; private set; }
         public string Url { get; private set; }
         public BrowserErrorEventArgs(CefErrorCode errorCode, string errorText, string url)
+            : this(errorCode.ToString(), errorText, url)
         {
-            this.ErrorCode = errorCode.ToString();
+        }
+
+        public BrowserErrorEventArgs(string errorCode, string errorText, string url)
+        {
+            this.ErrorCode = errorCode;
             this.ErrorText = errorText;
             this.Url = url;
         }

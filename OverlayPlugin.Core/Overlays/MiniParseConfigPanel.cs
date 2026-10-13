@@ -52,6 +52,7 @@ namespace RainbowMage.OverlayPlugin.Overlays
             this.checkNoFocus.Checked = config.NoFocus;
             this.nudMaxFrameRate.Value = config.MaxFrameRate;
             SetupRefreshRateOption();
+            SetupWebView2Option();
             this.checkLogConsoleMessages.Checked = config.LogConsoleMessages;
             this.tbZoom.Value = config.Zoom;
             this.cbWhiteBg.Checked = config.ForceWhiteBackground;
@@ -215,6 +216,47 @@ namespace RainbowMage.OverlayPlugin.Overlays
                 nudMaxFrameRate.Enabled = !cbMatchRefreshRate.Checked;
             };
             tabAdvanced.Controls.Add(cbMatchRefreshRate);
+        }
+
+        // Fork: the renderer of this overlay (see OverlayConfigBase.UseWebView2).
+        private void SetupWebView2Option()
+        {
+            var ko = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
+            var available = HtmlRenderer.Renderer.WebView2Available;
+            var label = new Label
+            {
+                Text = ko ? "렌더러" : "Renderer",
+                Location = new Point(label6.Left, tableLayoutPanel4.Bottom + 12),
+                AutoSize = true,
+            };
+            var cbUseWebView2 = new CheckBox
+            {
+                Name = "cbUseWebView2",
+                Text = ko ? "WebView2로 그리기 (실험, ACT를 다시 시작하면 적용)" : "Draw with WebView2 (experimental, applies after restarting ACT)",
+                Location = new Point(nudMaxFrameRate.Left, label.Top - 2),
+                AutoSize = true,
+                UseVisualStyleBackColor = true,
+                Checked = config.UseWebView2,
+                Enabled = available || config.UseWebView2,
+            };
+            cbUseWebView2.CheckedChanged += (o, e) => config.UseWebView2 = cbUseWebView2.Checked;
+            var note = new Label
+            {
+                Text = !available
+                    ? (ko ? "WebView2 런타임을 사용할 수 없습니다: " : "The WebView2 runtime can't be used: ") + HtmlRenderer.Renderer.WebView2Status
+                    : ko
+                    ? "엣지 엔진이 모니터 갱신에 맞춰 직접 그려 움직임이 고릅니다. 프레임 레이트 설정은 쓰이지 않습니다.\n" +
+                      "투명한 곳도 클릭을 막으므로 클릭 통과 오버레이에 씁니다. 저장 데이터(localStorage)는 CEF와 따로입니다."
+                    : "Edge draws in step with the display, for even motion. The frame rate setting isn't used.\n" +
+                      "Transparent areas take clicks too, so use it for click-through overlays. Local storage is separate from CEF's.",
+                Location = new Point(nudMaxFrameRate.Left + 2, cbUseWebView2.Bottom + 2),
+                MaximumSize = new Size(tabAdvanced.ClientSize.Width - nudMaxFrameRate.Left - 8, 0),
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+            };
+            tabAdvanced.Controls.Add(label);
+            tabAdvanced.Controls.Add(cbUseWebView2);
+            tabAdvanced.Controls.Add(note);
         }
 
         private void nudMaxFrameRate_ValueChanged(object sender, EventArgs e)

@@ -72,5 +72,7 @@
     <!-- Fork: DirectComposition presenter for shared textures (DCompPresenter.cs). -->
     <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
     <PackageReference Include="SharpDX.DirectComposition" Version="4.2.0" />
+    <!-- Fork: the WebView2 renderer option (WebView2Browser.cs). -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   </ItemGroup>
 </Project>

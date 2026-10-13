@@ -26,8 +26,10 @@ namespace RainbowMage.HtmlRenderer
         private bool terminated = false;
 
         // Fork: with shared textures the window shows its frames through DirectComposition
-        // instead of UpdateLayeredWindow (see DCompPresenter).
-        private readonly bool useDComp = CefRenderer.SharedTextures;
+        // instead of UpdateLayeredWindow (see DCompPresenter).  With WebView2, WebView2 draws into
+        // the window's DirectComposition visual itself (see WebView2Browser).
+        private readonly bool useWebView2;
+        private readonly bool useDComp;
         private DCompPresenter presenter;
         private int sharedFrameFailures = 0;
         private System.Windows.Forms.Timer hitTestTimer;
@@ -93,11 +95,15 @@ namespace RainbowMage.HtmlRenderer
             }
         }
 
-        public OverlayForm(string overlayName, string overlayUuid, string url, int maxFrameRate = 30, object api = null)
+        public OverlayForm(string overlayName, string overlayUuid, string url, int maxFrameRate = 30, object api = null, bool useWebView2 = false)
         {
+            // Before the window exists: they decide its style (CreateParams, OnHandleCreated).
+            this.useWebView2 = useWebView2 && CefRenderer.WebView2Available;
+            this.useDComp = this.useWebView2 || CefRenderer.SharedTextures;
+
             InitializeComponent();
 
-            this.Renderer = new WinFormsOffScreenRenderer(overlayName, overlayUuid, url, this, api);
+            this.Renderer = new WinFormsOffScreenRenderer(overlayName, overlayUuid, url, this, api, this.useWebView2);
             this.maxFrameRate = maxFrameRate;
             this.url = url;
 
@@ -162,6 +168,8 @@ namespace RainbowMage.HtmlRenderer
             {
                 // Layered (for click-through) but drawn by DirectComposition: fully opaque layer.
                 NativeMethods.SetLayeredWindowAttributes(Handle, 0, 255, NativeMethods.LWA_ALPHA);
+                // WebView2 sets up the window's composition itself, without pixels to hit test.
+                if (useWebView2) return;
                 presenter?.Dispose();
                 presenter = new DCompPresenter(Handle);
 

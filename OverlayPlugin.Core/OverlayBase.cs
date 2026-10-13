@@ -127,7 +127,14 @@ namespace RainbowMage.OverlayPlugin
         {
             try
             {
-                this.Overlay = new OverlayForm(this.Name, Config.Uuid.ToString(), Config.Url, this.Config.MaxFrameRate, new OverlayApi(container, this));
+                this.Overlay = new OverlayForm(this.Name, Config.Uuid.ToString(), Config.Url, this.Config.MaxFrameRate, new OverlayApi(container, this), this.Config.UseWebView2);
+                if (this.Config.UseWebView2)
+                {
+                    if (this.Overlay.Renderer.UsesWebView2)
+                        Log(LogLevel.Info, "Drawing with WebView2 {0}.", HtmlRenderer.Renderer.WebView2Status);
+                    else
+                        Log(LogLevel.Warning, "WebView2 can't be used ({0}); drawing with CEF.", HtmlRenderer.Renderer.WebView2Status);
+                }
 
                 // 画面外にウィンドウがある場合は、初期表示位置をシステムに設定させる
                 if (!Util.IsOnScreen(this.Overlay))

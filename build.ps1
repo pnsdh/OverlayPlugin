@@ -53,6 +53,11 @@ try {
     cp -Recurse libs\resources OverlayPlugin
     cp -Recurse libs\*.dll OverlayPlugin\libs
     del OverlayPlugin\libs\CefSharp.*
+    # Fork: the WebView2 renderer (HtmlRenderer/WebView2Browser.cs) needs its native loader, not
+    # the WinForms/WPF controls.
+    del OverlayPlugin\libs\Microsoft.Web.WebView2.WinForms.dll, OverlayPlugin\libs\Microsoft.Web.WebView2.Wpf.dll
+    mkdir OverlayPlugin\libs\runtimes\win-x64\native
+    cp libs\runtimes\win-x64\native\WebView2Loader.dll OverlayPlugin\libs\runtimes\win-x64\native
 
     # Translations
     cp -Recurse @("de-DE", "fr-FR", "ja-JP", "ko-KR", "zh-CN") OverlayPlugin
