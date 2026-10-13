@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -22,8 +23,8 @@ namespace RainbowMage.HtmlRenderer
     // draws straight into a DirectComposition visual of the overlay window, paced by the display
     // like Edge itself, while CEF's offscreen frames are not (see tools/RenderBench).  The page
     // gets the same OverlayPluginApi object through a small script over WebView2's messages.
-    // There are no pixels to hit test, so the whole window takes the mouse unless the overlay is
-    // click-through.  All WebView2 calls happen on the window's (ACT's UI) thread.
+    // WebView2 doesn't hand over its frames: pixels for hit tests and screenshots come through the
+    // DevTools protocol.  All WebView2 calls happen on the window's (ACT's UI) thread.
     internal sealed class WebView2Browser : IDisposable
     {
         private static string userDataFolder;
@@ -49,6 +50,10 @@ namespace RainbowMage.HtmlRenderer
         // Scripts from any thread, run together on the UI thread (see ExecuteScript).
         private readonly ConcurrentQueue<string> scripts = new ConcurrentQueue<string>();
         private int scriptFlushQueued;
+        // The last button press, to send a second one as a double click (see SendMouseUpDown).
+        private DateTime lastDownTime;
+        private Point lastDownPosition;
+        private MouseButtonType lastDownButton;
 
         // Returns the WebView2 runtime version, or null with the reason when it can't be used.
         public static string Initialize(string loaderFolder, string userData, out string error)
@@ -136,12 +141,14 @@ namespace RainbowMage.HtmlRenderer
                 core.WebMessageReceived += OnWebMessageReceived;
                 core.ContextMenuRequested += OnContextMenuRequested;
                 core.ProcessFailed += OnProcessFailed;
+                controller.CursorChanged += OnCursorChanged;
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(ApiScript());
                 await ForwardConsole(core);
                 if (disposed) return;
 
                 form.Resize += OnFormResize;
                 form.VisibleChanged += OnFormVisibleChanged;
+                form.Activated += OnFormActivated;
                 core.Navigate(url);
             }
             catch (Exception ex)
@@ -332,20 +339,108 @@ namespace RainbowMage.HtmlRenderer
 
         public void SendMouseUpDown(int x, int y, MouseButtonType button, bool isMouseUp)
         {
+            // Windows' order for a double click: down, up, double click, up.
+            var doubleClick = false;
+            if (!isMouseUp)
+            {
+                var now = DateTime.Now;
+                doubleClick = button == lastDownButton && lastDownPosition == new Point(x, y) &&
+                    (now - lastDownTime).TotalMilliseconds <= SystemInformation.DoubleClickTime;
+                lastDownTime = doubleClick ? DateTime.MinValue : now;
+                lastDownPosition = new Point(x, y);
+                lastDownButton = button;
+            }
+
             CoreWebView2MouseEventKind kind;
             switch (button)
             {
                 case MouseButtonType.Middle:
-                    kind = isMouseUp ? CoreWebView2MouseEventKind.MiddleButtonUp : CoreWebView2MouseEventKind.MiddleButtonDown;
+                    kind = isMouseUp ? CoreWebView2MouseEventKind.MiddleButtonUp
+                        : doubleClick ? CoreWebView2MouseEventKind.MiddleButtonDoubleClick : CoreWebView2MouseEventKind.MiddleButtonDown;
                     break;
                 case MouseButtonType.Right:
-                    kind = isMouseUp ? CoreWebView2MouseEventKind.RightButtonUp : CoreWebView2MouseEventKind.RightButtonDown;
+                    kind = isMouseUp ? CoreWebView2MouseEventKind.RightButtonUp
+                        : doubleClick ? CoreWebView2MouseEventKind.RightButtonDoubleClick : CoreWebView2MouseEventKind.RightButtonDown;
                     break;
                 default:
-                    kind = isMouseUp ? CoreWebView2MouseEventKind.LeftButtonUp : CoreWebView2MouseEventKind.LeftButtonDown;
+                    kind = isMouseUp ? CoreWebView2MouseEventKind.LeftButtonUp
+                        : doubleClick ? CoreWebView2MouseEventKind.LeftButtonDoubleClick : CoreWebView2MouseEventKind.LeftButtonDown;
                     break;
             }
             SendMouse(kind, x, y, ButtonKeys(button, !isMouseUp), 0);
+        }
+
+        // Whether the page's pixel under (x, y) of the window isn't fully transparent, like
+        // DCompPresenter.IsOpaqueAt.  Asynchronous (about 20ms): the result comes on the UI thread.
+        public async void QueryOpaqueAt(int x, int y, Action<bool> result)
+        {
+            var core = controller?.CoreWebView2;
+            if (core == null || !navigated)
+            {
+                result(false);
+                return;
+            }
+            bool opaque;
+            try
+            {
+                using (var bmp = await CapturePage(core, x, y, 1, 1))
+                    opaque = bmp.GetPixel(0, 0).A != 0;
+            }
+            catch (Exception)
+            {
+                // Keep taking the mouse, as without hit tests.
+                opaque = true;
+            }
+            result(opaque);
+        }
+
+        // A PNG of the page through the DevTools protocol, transparency included.  The region is in
+        // window pixels; the protocol takes CSS pixels of the document.
+        private async Task<Bitmap> CapturePage(CoreWebView2 core, int x, int y, int width, int height)
+        {
+            var scale = controller.RasterizationScale * controller.ZoomFactor;
+            var metrics = JObject.Parse(await core.CallDevToolsProtocolMethodAsync("Page.getLayoutMetrics", "{}"));
+            var viewport = metrics["cssVisualViewport"];
+            // Within the viewport: capturing beyond it resizes the page for the capture.
+            var args = new JObject
+            {
+                ["format"] = "png",
+                ["captureBeyondViewport"] = false,
+                ["clip"] = new JObject
+                {
+                    ["x"] = x / scale + ((double?)viewport?["pageX"] ?? 0),
+                    ["y"] = y / scale + ((double?)viewport?["pageY"] ?? 0),
+                    ["width"] = width / scale,
+                    ["height"] = height / scale,
+                    ["scale"] = scale,
+                },
+            };
+            var json = await core.CallDevToolsProtocolMethodAsync("Page.captureScreenshot", args.ToString(Formatting.None));
+            var data = Convert.FromBase64String((string)JObject.Parse(json)["data"]);
+            using (var stream = new MemoryStream(data))
+            using (var decoded = new Bitmap(stream))
+                return new Bitmap(decoded);
+        }
+
+        // The whole overlay as a bitmap (OverlayPluginApi.makeScreenshot).  Waits for the UI thread,
+        // so it can't be called there.
+        public Bitmap Screenshot()
+        {
+            if (!form.InvokeRequired) return null;
+            var done = new TaskCompletionSource<Bitmap>();
+            OnUiThread(async () =>
+            {
+                try
+                {
+                    var core = controller?.CoreWebView2;
+                    done.TrySetResult(core == null ? null : await CapturePage(core, 0, 0, form.ClientSize.Width, form.ClientSize.Height));
+                }
+                catch (Exception ex)
+                {
+                    done.TrySetException(ex);
+                }
+            });
+            return done.Task.Wait(5000) ? done.Task.Result : null;
         }
 
         public void SendMouseWheel(int x, int y, int delta, bool isVertical)
@@ -380,6 +475,29 @@ namespace RainbowMage.HtmlRenderer
         private void OnFormResize(object sender, EventArgs e)
         {
             if (controller != null) controller.Bounds = new Rectangle(Point.Empty, form.ClientSize);
+        }
+
+        private void OnCursorChanged(object sender, object e)
+        {
+            try
+            {
+                form.Cursor = new Cursor(controller.Cursor);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        // An overlay that takes the focus gives it to the page, for keyboard input.
+        private void OnFormActivated(object sender, EventArgs e)
+        {
+            try
+            {
+                controller?.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
+            }
+            catch (Exception)
+            {
+            }
         }
 
         // Hidden overlays stop drawing (and run their timers less often), like a hidden Edge tab.
@@ -465,6 +583,7 @@ namespace RainbowMage.HtmlRenderer
             disposed = true;
             form.Resize -= OnFormResize;
             form.VisibleChanged -= OnFormVisibleChanged;
+            form.Activated -= OnFormActivated;
             try
             {
                 controller?.Close();

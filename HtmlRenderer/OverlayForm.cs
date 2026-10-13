@@ -33,6 +33,9 @@ namespace RainbowMage.HtmlRenderer
         private DCompPresenter presenter;
         private int sharedFrameFailures = 0;
         private System.Windows.Forms.Timer hitTestTimer;
+        private bool hitTestPending;
+        private Point lastHitTest;
+        private DateTime lastHitTestTime;
 
         private const int WS_EX_TOPMOST = 0x00000008;
         private const int WS_EX_LAYERED = 0x00080000;
@@ -168,10 +171,12 @@ namespace RainbowMage.HtmlRenderer
             {
                 // Layered (for click-through) but drawn by DirectComposition: fully opaque layer.
                 NativeMethods.SetLayeredWindowAttributes(Handle, 0, 255, NativeMethods.LWA_ALPHA);
-                // WebView2 sets up the window's composition itself, without pixels to hit test.
-                if (useWebView2) return;
-                presenter?.Dispose();
-                presenter = new DCompPresenter(Handle);
+                // WebView2 sets up the window's composition itself.
+                if (!useWebView2)
+                {
+                    presenter?.Dispose();
+                    presenter = new DCompPresenter(Handle);
+                }
 
                 if (hitTestTimer == null)
                 {
@@ -187,11 +192,34 @@ namespace RainbowMage.HtmlRenderer
         // becomes transparent to the mouse while the cursor is over a transparent pixel.
         private void HitTestTimer_Tick(object sender, EventArgs e)
         {
-            if (terminated || presenter == null || isClickThru || MouseButtons != MouseButtons.None) return;
+            if (terminated || isClickThru || MouseButtons != MouseButtons.None) return;
 
             var cursor = Cursor.Position;
             if (!Bounds.Contains(cursor)) return;
 
+            // WebView2's pixels come asynchronously (WebView2Browser.QueryOpaqueAt).
+            if (useWebView2)
+            {
+                // Each answer takes a capture: again only when the cursor moved, or the page may
+                // have changed under it.
+                if (hitTestPending || Renderer == null) return;
+                if (cursor == lastHitTest && (DateTime.Now - lastHitTestTime).TotalMilliseconds < 250) return;
+                lastHitTest = cursor;
+                lastHitTestTime = DateTime.Now;
+                hitTestPending = true;
+                Renderer.QueryOpaqueAt(cursor.X - Left, cursor.Y - Top, result =>
+                {
+                    hitTestPending = false;
+                    if (terminated || isClickThru || MouseButtons != MouseButtons.None) return;
+                    if (result)
+                        DisableMouseClickThru();
+                    else
+                        EnableMouseClickThru();
+                });
+                return;
+            }
+
+            if (presenter == null) return;
             bool opaque;
             try
             {

@@ -246,9 +246,9 @@ namespace RainbowMage.OverlayPlugin.Overlays
                     ? (ko ? "WebView2 런타임을 사용할 수 없습니다: " : "The WebView2 runtime can't be used: ") + HtmlRenderer.Renderer.WebView2Status
                     : ko
                     ? "엣지 엔진이 모니터 갱신에 맞춰 직접 그려 움직임이 고릅니다. 프레임 레이트 설정은 쓰이지 않습니다.\n" +
-                      "투명한 곳도 클릭을 막으므로 클릭 통과 오버레이에 씁니다. 저장 데이터(localStorage)는 CEF와 따로입니다."
+                      "오버레이 안에 저장된 데이터(localStorage)는 처음 한 번 CEF에서 가져오고, 이후로는 따로 저장됩니다."
                     : "Edge draws in step with the display, for even motion. The frame rate setting isn't used.\n" +
-                      "Transparent areas take clicks too, so use it for click-through overlays. Local storage is separate from CEF's.",
+                      "Data the overlay stores (local storage) is copied from CEF once, then kept separately.",
                 Location = new Point(nudMaxFrameRate.Left + 2, cbUseWebView2.Bottom + 2),
                 MaximumSize = new Size(tabAdvanced.ClientSize.Width - nudMaxFrameRate.Left - 8, 0),
                 AutoSize = true,

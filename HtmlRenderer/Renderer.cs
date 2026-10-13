@@ -454,8 +454,19 @@ namespace RainbowMage.HtmlRenderer
             }
         }
 
+        // Fork: see WebView2Browser.QueryOpaqueAt.
+        public void QueryOpaqueAt(int x, int y, Action<bool> result)
+        {
+            if (_wv != null)
+                _wv.QueryOpaqueAt(x, y, result);
+            else
+                result(false);
+        }
+
         public Bitmap Screenshot()
         {
+            if (_useWebView2)
+                return _wv?.Screenshot();
             if (_browser != null && _browser.IsBrowserInitialized)
             {
                 return _browser.Screenshot();
