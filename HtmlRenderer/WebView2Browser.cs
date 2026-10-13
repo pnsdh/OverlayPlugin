@@ -371,7 +371,9 @@ namespace RainbowMage.HtmlRenderer
         }
 
         // Whether the page's pixel under (x, y) of the window isn't fully transparent, like
-        // DCompPresenter.IsOpaqueAt.  Asynchronous (about 20ms): the result comes on the UI thread.
+        // DCompPresenter.IsOpaqueAt.  A capture costs about as much CPU whatever its size, so the
+        // whole window's alpha is captured at most twice a second and the answers come from it:
+        // at once while it is fresh, else after a new capture (about 20ms), on the UI thread.
         public async void QueryOpaqueAt(int x, int y, Action<bool> result)
         {
             var core = controller?.CoreWebView2;
@@ -380,18 +382,51 @@ namespace RainbowMage.HtmlRenderer
                 result(false);
                 return;
             }
-            bool opaque;
+            var size = form.ClientSize;
+            if (alphaMap == null || alphaMapSize != size || (DateTime.Now - alphaMapTime).TotalMilliseconds > 500)
+            {
+                try
+                {
+                    using (var bmp = await CapturePage(core, 0, 0, size.Width, size.Height))
+                        alphaMap = ReadAlpha(bmp);
+                    alphaMapSize = size;
+                }
+                catch (Exception)
+                {
+                    alphaMap = null;
+                }
+                alphaMapTime = DateTime.Now;
+            }
+            // Without a map, keep taking the mouse, as without hit tests.
+            var map = alphaMap;
+            result(map == null || x < 0 || y < 0 || x >= alphaMapSize.Width || y >= alphaMapSize.Height ||
+                map[y * alphaMapSize.Width + x] != 0);
+        }
+
+        private byte[] alphaMap;
+        private Size alphaMapSize;
+        private DateTime alphaMapTime;
+
+        private static byte[] ReadAlpha(Bitmap bmp)
+        {
+            var data = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height),
+                System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
             try
             {
-                using (var bmp = await CapturePage(core, x, y, 1, 1))
-                    opaque = bmp.GetPixel(0, 0).A != 0;
+                var row = new byte[bmp.Width * 4];
+                var alpha = new byte[bmp.Width * bmp.Height];
+                for (var y = 0; y < bmp.Height; y++)
+                {
+                    Marshal.Copy(data.Scan0 + y * data.Stride, row, 0, row.Length);
+                    for (var x = 0; x < bmp.Width; x++)
+                        alpha[y * bmp.Width + x] = row[x * 4 + 3];
+                }
+                return alpha;
             }
-            catch (Exception)
+            finally
             {
-                // Keep taking the mouse, as without hit tests.
-                opaque = true;
+                bmp.UnlockBits(data);
             }
-            result(opaque);
         }
 
         // A PNG of the page through the DevTools protocol, transparency included.  The region is in
