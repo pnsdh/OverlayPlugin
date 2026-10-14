@@ -162,9 +162,16 @@ namespace RainbowMage.OverlayPlugin.Overlays
                     // per second (which is the same rate the real events are sent at).
                     previewTimer = new System.Threading.Timer((state) =>
                     {
-                        HandleEvent(eventData);
+                        // Fork: also runs while the overlay closes; a timer exception ends ACT.
+                        try
+                        {
+                            HandleEvent(eventData);
 
-                        ExecuteScript("document.dispatchEvent(new CustomEvent('onExampleShowcase', null));");
+                            ExecuteScript("document.dispatchEvent(new CustomEvent('onExampleShowcase', null));");
+                        }
+                        catch (Exception)
+                        {
+                        }
                     }, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
                 }
                 catch (Exception ex)

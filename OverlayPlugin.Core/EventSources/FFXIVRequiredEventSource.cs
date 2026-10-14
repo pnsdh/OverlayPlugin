@@ -436,21 +436,29 @@ namespace RainbowMage.OverlayPlugin.EventSources
             {
                 var now = DateTime.Now;
 
-                if (HasSubscriber(JobGaugeChangedEvent))
+                // Fork: an exception ended this loop, and job gauge events with it, for the session.
+                try
                 {
-                    var jobGauge = jobGaugeMemory.GetJobGauge();
-
-                    if (jobGauge != null)
+                    if (HasSubscriber(JobGaugeChangedEvent))
                     {
-                        if (!jobGauge.Equals(lastJobGauge))
-                        {
-                            lastJobGauge = jobGauge;
-                            var obj = JObject.FromObject(jobGauge);
-                            obj["type"] = JobGaugeChangedEvent;
+                        var jobGauge = jobGaugeMemory.GetJobGauge();
 
-                            DispatchAndCacheEvent(obj);
+                        if (jobGauge != null)
+                        {
+                            if (!jobGauge.Equals(lastJobGauge))
+                            {
+                                lastJobGauge = jobGauge;
+                                var obj = JObject.FromObject(jobGauge);
+                                obj["type"] = JobGaugeChangedEvent;
+
+                                DispatchAndCacheEvent(obj);
+                            }
                         }
                     }
+                }
+                catch (Exception ex)
+                {
+                    Log(LogLevel.Debug, $"Job gauge: {ex.Message}");
                 }
 
                 // Wait for next poll

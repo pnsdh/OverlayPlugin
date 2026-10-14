@@ -29,6 +29,7 @@ namespace RainbowMage.HtmlRenderer
     {
         private static string userDataFolder;
         private static Task<CoreWebView2Environment> environment;
+        private static bool loaderPathSet;
         private static D3D11.Device device;
         private static DComp.Device dcomp;
 
@@ -61,7 +62,12 @@ namespace RainbowMage.HtmlRenderer
             error = null;
             try
             {
-                CoreWebView2Environment.SetLoaderDllFolderPath(loaderFolder);
+                // Fork: only once per process (again throws), e.g. when the plugin is re-enabled.
+                if (!loaderPathSet)
+                {
+                    CoreWebView2Environment.SetLoaderDllFolderPath(loaderFolder);
+                    loaderPathSet = true;
+                }
                 userDataFolder = userData;
                 return CoreWebView2Environment.GetAvailableBrowserVersionString();
             }
@@ -136,7 +142,7 @@ namespace RainbowMage.HtmlRenderer
                 core.Settings.IsStatusBarEnabled = false;
                 core.Settings.IsZoomControlEnabled = false;
                 core.IsMuted = muted;
-                core.NavigationStarting += OnNavigationStarting;
+                core.ContentLoading += OnContentLoading;
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.WebMessageReceived += OnWebMessageReceived;
                 core.ContextMenuRequested += OnContextMenuRequested;
@@ -155,6 +161,12 @@ namespace RainbowMage.HtmlRenderer
             }
             catch (Exception ex)
             {
+                // Fork: a failed environment isn't kept, or every later overlay would fail too
+                // until ACT restarts (e.g. the runtime was being updated).
+                if (environment != null && environment.IsCompleted && (environment.IsFaulted || environment.IsCanceled))
+                    environment = null;
+                // As an error, which is logged whatever the overlay's console setting.
+                owner.RaiseError("WebView2", ex.Message, url);
                 owner.RaiseConsoleLog("WebView2: " + ex, "internal", 1);
             }
         }
@@ -254,6 +266,20 @@ namespace RainbowMage.HtmlRenderer
 })();";
 
         private void OnWebMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        {
+            // Fork: a page's malformed call (e.g. an object where a string is expected) is logged,
+            // not thrown on ACT's UI thread.
+            try
+            {
+                HandleWebMessage(e);
+            }
+            catch (Exception ex)
+            {
+                owner.RaiseConsoleLog("OverlayPluginApi: " + ex.Message, "internal", 1);
+            }
+        }
+
+        private void HandleWebMessage(CoreWebView2WebMessageReceivedEventArgs e)
         {
             JObject message;
             try
@@ -756,10 +782,13 @@ namespace RainbowMage.HtmlRenderer
             if (controller != null) controller.IsVisible = form.Visible;
         }
 
-        private void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
+        // A new document replaces the page.  Not NavigationStarting: a navigation can still be
+        // cancelled there (e.g. a download link), which left the page running without its
+        // subscriptions and scripts.
+        private void OnContentLoading(object sender, CoreWebView2ContentLoadingEventArgs e)
         {
             navigated = false;
-            owner.RaiseStartLoading(e.Uri);
+            owner.RaiseStartLoading(controller?.CoreWebView2?.Source ?? url);
         }
 
         private void OnNavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
@@ -786,7 +815,7 @@ namespace RainbowMage.HtmlRenderer
 
         private void OnProcessFailed(object sender, CoreWebView2ProcessFailedEventArgs e)
         {
-            owner.RaiseConsoleLog($"WebView2 process failed: {e.ProcessFailedKind} {e.Reason} {e.ExitCode}", "internal", 1);
+            owner.RaiseError("WebView2", $"process failed: {e.ProcessFailedKind} {e.Reason} {e.ExitCode}", url);
             if (e.ProcessFailedKind == CoreWebView2ProcessFailedKind.BrowserProcessExited ||
                 e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessExited ||
                 e.ProcessFailedKind == CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)

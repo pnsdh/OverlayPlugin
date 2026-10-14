@@ -17,6 +17,13 @@ namespace RainbowMage.OverlayPlugin.Updater
         // Fork: CEF bundles (built by build-cef-redists.ps1) are released on the fork's CEF repo.
         const string CEF_DL = "https://github.com/pnsdh/OverlayPlugin-CEF/releases/download/v{CEF_VERSION}/CefSharp-{CEF_VERSION}-{ARCH}.7z";
         const string CEF_VERSION = "152.0.10";
+        // Fork: SHA-256 of each CefSharp-{CEF_VERSION}-{ARCH}.7z, checked before extraction since
+        // its DLLs are loaded into ACT.  Update with CEF_VERSION: the release page lists each
+        // asset's digest (gh release view v<version> -R pnsdh/OverlayPlugin-CEF --json assets).
+        static readonly Dictionary<string, string> CEF_SHA256 = new Dictionary<string, string>
+        {
+            ["x64"] = "e7276016f4f96aef740fcd73fa3908e3cd6997ba73c9422993f9a1239e5035f3",
+        };
 
         public static string GetUrl()
         {
@@ -99,7 +106,10 @@ namespace RainbowMage.OverlayPlugin.Updater
 
         public static async Task<bool> InstallCef(string cefPath, string archivePath = null)
         {
-            var result = await Installer.Run(archivePath == null ? GetUrl() : archivePath, cefPath, "OverlayPluginCef.tmp");
+            string sha256 = null;
+            if (archivePath == null)
+                CEF_SHA256.TryGetValue(Environment.Is64BitProcess ? "x64" : "x86", out sha256);
+            var result = await Installer.Run(archivePath == null ? GetUrl() : archivePath, cefPath, "OverlayPluginCef.tmp", 0, false, sha256);
             if (!result || !Directory.Exists(cefPath))
             {
                 MessageBox.Show(

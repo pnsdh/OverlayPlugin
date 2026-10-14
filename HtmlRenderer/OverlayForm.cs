@@ -34,6 +34,8 @@ namespace RainbowMage.HtmlRenderer
         private int sharedFrameFailures = 0;
         private System.Windows.Forms.Timer hitTestTimer;
         private bool hitTestPending;
+        // Fork: the window handle for UpdateLayeredWindow, which runs on CEF's paint thread.
+        private IntPtr layeredHandle;
         private Point lastHitTest;
         private DateTime lastHitTestTime;
 
@@ -166,6 +168,7 @@ namespace RainbowMage.HtmlRenderer
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            layeredHandle = Handle;
 
             if (useDComp)
             {
@@ -202,6 +205,9 @@ namespace RainbowMage.HtmlRenderer
             {
                 // Each answer takes a capture: again only when the cursor moved, or the page may
                 // have changed under it.
+                // An answer that never came (renderer gone or stuck) doesn't stop hit tests for good.
+                if (hitTestPending && (DateTime.Now - lastHitTestTime).TotalSeconds > 2)
+                    hitTestPending = false;
                 if (hitTestPending || Renderer == null) return;
                 if (cursor == lastHitTest && (DateTime.Now - lastHitTestTime).TotalMilliseconds < 250) return;
                 lastHitTest = cursor;
@@ -305,17 +311,11 @@ namespace RainbowMage.HtmlRenderer
             {
                 if (!this.terminated)
                 {
-                    if (this.InvokeRequired)
-                    {
-                        this.Invoke(new Action(() =>
-                        {
-                            handle = this.Handle;
-                        }));
-                    }
-                    else
-                    {
-                        handle = this.Handle;
-                    }
+                    // Fork: kept from OnHandleCreated instead of waiting for the UI thread on every
+                    // frame, which stalled drawing while ACT's UI was busy.
+                    handle = layeredHandle;
+                    if (handle == IntPtr.Zero)
+                        return;
 
                     NativeMethods.UpdateLayeredWindow(
                         handle,
@@ -433,7 +433,14 @@ namespace RainbowMage.HtmlRenderer
                 // opened here.  Switch this overlay to CPU frames.
                 if (++sharedFrameFailures == 3 && IsHandleCreated)
                 {
-                    BeginInvoke(new Action(() => Renderer?.FallBackToCpuFrames()));
+                    try
+                    {
+                        BeginInvoke(new Action(() => Renderer?.FallBackToCpuFrames()));
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        // The window closed meanwhile; this runs on CEF's thread, where it would end ACT.
+                    }
                 }
             }
         }

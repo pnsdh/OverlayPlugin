@@ -14,6 +14,8 @@ namespace RainbowMage.HtmlRenderer
     // Frames from OnPaint (CPU buffers) can be shown the same way, as a fallback.
     // All D3D work runs under one lock: CEF paints on its UI thread, hit tests and screenshots
     // come from other threads.
+    // When the GPU device is lost (driver update or reset, TDR), the shared device is created
+    // again and each presenter rebuilds its own objects on it (see EnsureCurrent).
     internal sealed class DCompPresenter : IDisposable
     {
         private static readonly object deviceLock = new object();
@@ -22,7 +24,12 @@ namespace RainbowMage.HtmlRenderer
         private static DComp.Device dcomp;
         // Signals when the copies out of CEF's shared texture are done (see PresentShared).
         private static D3D11.Query copyDone;
+        // Counts the shared devices made, so presenters notice a new one.
+        private static int deviceGeneration;
+        private static DateTime lastDeviceAttempt;
 
+        private readonly IntPtr hwnd;
+        private int generation = -1;
         private DComp.Target target;
         private DComp.Visual visual;
         private DXGI.SwapChain1 swapChain;
@@ -40,39 +47,110 @@ namespace RainbowMage.HtmlRenderer
             {
                 error = null;
                 if (device != null) return true;
-                try
-                {
-                    device = new D3D11.Device(SharpDX.Direct3D.DriverType.Hardware, D3D11.DeviceCreationFlags.BgraSupport);
-                    device1 = device.QueryInterface<D3D11.Device1>();
-                    using (var dxgiDevice = device.QueryInterface<DXGI.Device>())
-                    {
-                        dcomp = new DComp.Device(dxgiDevice);
-                    }
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    error = ex.ToString();
-                    dcomp?.Dispose();
-                    device1?.Dispose();
-                    device?.Dispose();
-                    dcomp = null;
-                    device1 = null;
-                    device = null;
-                    return false;
-                }
+                return CreateDevice(out error);
             }
+        }
+
+        // Under deviceLock.
+        private static bool CreateDevice(out string error)
+        {
+            error = null;
+            lastDeviceAttempt = DateTime.Now;
+            try
+            {
+                device = new D3D11.Device(SharpDX.Direct3D.DriverType.Hardware, D3D11.DeviceCreationFlags.BgraSupport);
+                device1 = device.QueryInterface<D3D11.Device1>();
+                using (var dxgiDevice = device.QueryInterface<DXGI.Device>())
+                {
+                    dcomp = new DComp.Device(dxgiDevice);
+                }
+                deviceGeneration++;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.ToString();
+                ReleaseDevice();
+                return false;
+            }
+        }
+
+        // Under deviceLock.
+        private static void ReleaseDevice()
+        {
+            copyDone?.Dispose();
+            dcomp?.Dispose();
+            device1?.Dispose();
+            device?.Dispose();
+            copyDone = null;
+            dcomp = null;
+            device1 = null;
+            device = null;
+        }
+
+        // Under deviceLock.  Whether an exception came from the device being lost; if so a new
+        // one is made, which presenters move to on their next call.
+        private static bool HandleDeviceLoss()
+        {
+            if (device == null) return true;
+            SharpDX.Result reason;
+            try
+            {
+                reason = device.DeviceRemovedReason;
+            }
+            catch (Exception)
+            {
+                reason = SharpDX.Result.Fail;
+            }
+            if (reason.Success) return false;
+
+            ReleaseDevice();
+            CreateDevice(out _);
+            return true;
         }
 
         public DCompPresenter(IntPtr hwnd)
         {
+            this.hwnd = hwnd;
             lock (deviceLock)
             {
-                target = DComp.Target.FromHwnd(dcomp, hwnd, true);
-                visual = new DComp.Visual(dcomp);
-                target.Root = visual;
-                dcomp.Commit();
+                EnsureCurrent();
             }
+        }
+
+        // Under deviceLock.  Builds this window's objects on the current shared device, again
+        // after it was replaced.  False while there is no device (it is retried every 2 seconds).
+        private bool EnsureCurrent()
+        {
+            if (device == null && (DateTime.Now - lastDeviceAttempt).TotalSeconds >= 2)
+                CreateDevice(out _);
+            if (device == null) return false;
+            if (generation == deviceGeneration) return true;
+
+            ReleaseOwn();
+            target = DComp.Target.FromHwnd(dcomp, hwnd, true);
+            visual = new DComp.Visual(dcomp);
+            target.Root = visual;
+            dcomp.Commit();
+            generation = deviceGeneration;
+            return true;
+        }
+
+        // Under deviceLock.
+        private void ReleaseOwn()
+        {
+            pixelStaging?.Dispose();
+            lastFrame?.Dispose();
+            swapChain?.Dispose();
+            visual?.Dispose();
+            target?.Dispose();
+            pixelStaging = null;
+            lastFrame = null;
+            swapChain = null;
+            visual = null;
+            target = null;
+            width = 0;
+            height = 0;
         }
 
         // Shows CEF's shared texture.  The handle is only valid during OnAcceleratedPaint.
@@ -80,28 +158,46 @@ namespace RainbowMage.HtmlRenderer
         {
             lock (deviceLock)
             {
-                if (disposed) return;
-                var ctx = device.ImmediateContext;
-                using (var texture = device1.OpenSharedResource1<D3D11.Texture2D>(sharedHandle))
+                if (disposed || !EnsureCurrent()) return;
+                try
                 {
-                    var desc = texture.Description;
-                    EnsureSize(desc.Width, desc.Height);
-                    using (var back = swapChain.GetBackBuffer<D3D11.Texture2D>(0))
-                    {
-                        ctx.CopyResource(texture, back);
-                        ctx.CopyResource(texture, lastFrame);
-                    }
-                    // CEF reuses the texture for a later frame as soon as OnAcceleratedPaint
-                    // returns, so wait until the GPU has copied it (well under a millisecond).
-                    copyDone = copyDone ?? new D3D11.Query(device, new D3D11.QueryDescription { Type = D3D11.QueryType.Event });
-                    ctx.End(copyDone);
-                    ctx.Flush();
-                    // The query answers a 4-byte BOOL: GetData<bool> asks for 1 byte and never succeeds.
-                    while (!ctx.GetData(copyDone, D3D11.AsynchronousFlags.None, out int done) || done == 0)
-                        System.Threading.Thread.Yield();
+                    PresentSharedOnDevice(sharedHandle);
                 }
-                swapChain.Present(0, DXGI.PresentFlags.None);
+                catch (Exception) when (HandleDeviceLoss())
+                {
+                    // The frame is lost with the device; the next one goes to the new device.
+                }
             }
+        }
+
+        private void PresentSharedOnDevice(IntPtr sharedHandle)
+        {
+            var ctx = device.ImmediateContext;
+            using (var texture = device1.OpenSharedResource1<D3D11.Texture2D>(sharedHandle))
+            {
+                var desc = texture.Description;
+                EnsureSize(desc.Width, desc.Height);
+                using (var back = swapChain.GetBackBuffer<D3D11.Texture2D>(0))
+                {
+                    ctx.CopyResource(texture, back);
+                    ctx.CopyResource(texture, lastFrame);
+                }
+                // CEF reuses the texture for a later frame as soon as OnAcceleratedPaint
+                // returns, so wait until the GPU has copied it (well under a millisecond).
+                copyDone = copyDone ?? new D3D11.Query(device, new D3D11.QueryDescription { Type = D3D11.QueryType.Event });
+                ctx.End(copyDone);
+                ctx.Flush();
+                // The query answers a 4-byte BOOL: GetData<bool> asks for 1 byte and never succeeds.
+                // Bounded: a GPU being reset may never answer, and this holds deviceLock.
+                var waited = System.Diagnostics.Stopwatch.StartNew();
+                while (!ctx.GetData(copyDone, D3D11.AsynchronousFlags.None, out int done) || done == 0)
+                {
+                    if (waited.ElapsedMilliseconds > 100)
+                        throw new TimeoutException("The GPU didn't finish copying the frame.");
+                    System.Threading.Thread.Yield();
+                }
+            }
+            swapChain.Present(0, DXGI.PresentFlags.None);
         }
 
         // Shows a BGRA buffer with premultiplied alpha from OnPaint.
@@ -109,15 +205,21 @@ namespace RainbowMage.HtmlRenderer
         {
             lock (deviceLock)
             {
-                if (disposed) return;
-                EnsureSize(bufferWidth, bufferHeight);
-                var ctx = device.ImmediateContext;
-                ctx.UpdateSubresource(new SharpDX.DataBox(buffer, bufferWidth * 4, 0), lastFrame, 0);
-                using (var back = swapChain.GetBackBuffer<D3D11.Texture2D>(0))
+                if (disposed || !EnsureCurrent()) return;
+                try
                 {
-                    ctx.CopyResource(lastFrame, back);
+                    EnsureSize(bufferWidth, bufferHeight);
+                    var ctx = device.ImmediateContext;
+                    ctx.UpdateSubresource(new SharpDX.DataBox(buffer, bufferWidth * 4, 0), lastFrame, 0);
+                    using (var back = swapChain.GetBackBuffer<D3D11.Texture2D>(0))
+                    {
+                        ctx.CopyResource(lastFrame, back);
+                    }
+                    swapChain.Present(0, DXGI.PresentFlags.None);
                 }
-                swapChain.Present(0, DXGI.PresentFlags.None);
+                catch (Exception) when (HandleDeviceLoss())
+                {
+                }
             }
         }
 
@@ -126,6 +228,8 @@ namespace RainbowMage.HtmlRenderer
             if (swapChain != null && w == width && h == height) return;
 
             lastFrame?.Dispose();
+            // Not left pointing at the disposed texture if creating the new one fails.
+            lastFrame = null;
             lastFrame = new D3D11.Texture2D(device, new D3D11.Texture2DDescription
             {
                 Width = w,
@@ -174,17 +278,24 @@ namespace RainbowMage.HtmlRenderer
         {
             lock (deviceLock)
             {
-                if (disposed || lastFrame == null || x < 0 || y < 0 || x >= width || y >= height) return false;
+                if (disposed || !EnsureCurrent() || lastFrame == null || x < 0 || y < 0 || x >= width || y >= height) return false;
 
-                if (pixelStaging == null)
-                    pixelStaging = CreateStaging(1, 1);
+                try
+                {
+                    if (pixelStaging == null)
+                        pixelStaging = CreateStaging(1, 1);
 
-                var ctx = device.ImmediateContext;
-                ctx.CopySubresourceRegion(lastFrame, 0, new D3D11.ResourceRegion(x, y, 0, x + 1, y + 1, 1), pixelStaging, 0);
-                var box = ctx.MapSubresource(pixelStaging, 0, D3D11.MapMode.Read, D3D11.MapFlags.None);
-                var alpha = Marshal.ReadByte(box.DataPointer, 3);
-                ctx.UnmapSubresource(pixelStaging, 0);
-                return alpha != 0;
+                    var ctx = device.ImmediateContext;
+                    ctx.CopySubresourceRegion(lastFrame, 0, new D3D11.ResourceRegion(x, y, 0, x + 1, y + 1, 1), pixelStaging, 0);
+                    var box = ctx.MapSubresource(pixelStaging, 0, D3D11.MapMode.Read, D3D11.MapFlags.None);
+                    var alpha = Marshal.ReadByte(box.DataPointer, 3);
+                    ctx.UnmapSubresource(pixelStaging, 0);
+                    return alpha != 0;
+                }
+                catch (Exception) when (HandleDeviceLoss())
+                {
+                    return false;
+                }
             }
         }
 
@@ -193,7 +304,7 @@ namespace RainbowMage.HtmlRenderer
         {
             lock (deviceLock)
             {
-                if (disposed || lastFrame == null) return null;
+                if (disposed || !EnsureCurrent() || lastFrame == null) return null;
 
                 using (var staging = CreateStaging(width, height))
                 {
@@ -240,15 +351,11 @@ namespace RainbowMage.HtmlRenderer
             {
                 if (disposed) return;
                 disposed = true;
-                pixelStaging?.Dispose();
-                lastFrame?.Dispose();
-                if (visual != null)
+                if (visual != null && generation == deviceGeneration)
                 {
                     visual.Content = null;
                 }
-                swapChain?.Dispose();
-                visual?.Dispose();
-                target?.Dispose();
+                ReleaseOwn();
                 dcomp?.Commit();
             }
         }

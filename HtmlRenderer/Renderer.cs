@@ -891,16 +891,31 @@ MaxUploadsPerDay=0
             }
         }
 
+        // Fork: CEF 120+ keeps the caches in the profile ("Default") and its shader caches at the
+        // root; the root folders above are CEF 95's.
+        private static readonly string[] ClearedCacheFolders = new string[]
+        {
+            "Cache", "Code Cache", "GPUCache", "GrShaderCache", "ShaderCache", "GPUPersistentCache",
+            @"Default\Cache", @"Default\Code Cache", @"Default\GPUCache", @"Default\DawnGraphiteCache", @"Default\DawnWebGPUCache",
+        };
+
         public static void ClearCache()
         {
             if (CachePath != null)
             {
-                foreach (var folder in CacheFolders)
+                foreach (var folder in ClearedCacheFolders)
                 {
                     var fullPath = Path.Combine(CachePath, folder);
-                    if (Directory.Exists(fullPath))
+                    try
                     {
-                        Directory.Delete(fullPath, true);
+                        if (Directory.Exists(fullPath))
+                        {
+                            Directory.Delete(fullPath, true);
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        // A file in use; the other folders are still cleared.
                     }
                 }
             }
@@ -1080,7 +1095,12 @@ MaxUploadsPerDay=0
             {
                 var source = new TaskCompletionSource<Bitmap>();
                 screenshotSource = source;
-                source.Task.Wait();
+                // Fork: a page that doesn't change paints no frame to take; don't wait forever.
+                if (!source.Task.Wait(5000))
+                {
+                    screenshotSource = null;
+                    return null;
+                }
 
                 if (source.Task.Exception != null) throw source.Task.Exception;
                 return source.Task.Result;

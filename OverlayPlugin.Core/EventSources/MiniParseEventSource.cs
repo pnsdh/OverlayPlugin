@@ -71,6 +71,12 @@ namespace RainbowMage.OverlayPlugin.EventSources
                 var file = msg["file"]?.ToString();
                 if (file == null)
                     return null;
+                // Fork: no network shares; opening one sends the Windows login's hash to that host.
+                if (file.StartsWith(@"\\") || file.StartsWith("//") || file.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+                {
+                    Log(LogLevel.Warning, $"playSound: ignored {file} (only local paths)");
+                    return null;
+                }
 
                 ActGlobals.oFormActMain.PlaySound(file);
                 return null;
@@ -116,6 +122,19 @@ namespace RainbowMage.OverlayPlugin.EventSources
                 if (!wsServer.IsRunning())
                 {
                     result["$error"] = "WSServer is not running";
+                    return result;
+                }
+
+                // Fork: only web pages and local HTML files.  The URL goes to the shell, which would
+                // also run programs and any registered protocol handler without asking.
+                Uri target;
+                if (!Uri.TryCreate(msg["url"].ToString(), UriKind.Absolute, out target) ||
+                    !(target.Scheme == Uri.UriSchemeHttp || target.Scheme == Uri.UriSchemeHttps ||
+                      (target.IsFile && !target.IsUnc && (target.LocalPath.EndsWith(".html", StringComparison.OrdinalIgnoreCase) ||
+                                                          target.LocalPath.EndsWith(".htm", StringComparison.OrdinalIgnoreCase)))))
+                {
+                    result["$error"] = "openWebsiteWithWS only opens http(s) URLs and local HTML files.";
+                    Log(LogLevel.Warning, $"openWebsiteWithWS: refused {msg["url"]}");
                     return result;
                 }
 

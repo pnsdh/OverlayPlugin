@@ -19,12 +19,10 @@ namespace RainbowMage.OverlayPlugin
         /// <returns></returns>
         public static string CreateJsonSafeString(string str)
         {
-            return str
-                .Replace("\"", "\\\"")
-                .Replace("'", "\\'")
-                .Replace("\r", "\\r")
-                .Replace("\n", "\\n")
-                .Replace("\t", "\\t");
+            // Fork: JSON's own escaping (backslashes and every control character included), without
+            // the quotes; single quotes escaped as before.
+            var json = Newtonsoft.Json.JsonConvert.ToString(str ?? "");
+            return json.Substring(1, json.Length - 2).Replace("'", "\\'");
         }
 
         /// <summary>
