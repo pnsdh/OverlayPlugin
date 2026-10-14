@@ -7,6 +7,7 @@ using System.Net.Http;
 using System.Reflection;
 using System.Runtime.Serialization;
 using System.Threading;
+using System.Threading.Tasks;
 using Advanced_Combat_Tracker;
 
 namespace RainbowMage.OverlayPlugin.Updater
@@ -15,6 +16,12 @@ namespace RainbowMage.OverlayPlugin.Updater
     {
         public delegate bool ProgressInfoCallback(long resumed, long dltotal, long dlnow, long ultotal, long ulnow);
         private static readonly HttpClient client = new HttpClient();
+
+        // Fork: a request that reads a short answer (update checks) gives up after 15 seconds
+        // instead of HttpClient's 100, so an unreachable GitHub fails before the game is on screen.
+        // A download waits up to 30 seconds for the server to answer, then as long as it takes.
+        private static readonly TimeSpan AnswerTimeout = TimeSpan.FromSeconds(15);
+        private static readonly TimeSpan DownloadStartTimeout = TimeSpan.FromSeconds(30);
         static HttpClientWrapper()
         {
             client.DefaultRequestHeaders.Add("User-Agent", "OverlayPlugin/OverlayPlugin v" + Assembly.GetExecutingAssembly().GetName().Version.ToString());
@@ -36,7 +43,6 @@ namespace RainbowMage.OverlayPlugin.Updater
             if (!ActGlobals.oFormActMain.InvokeRequired)
                 throw new HttpClientException(false, "HttpClientWrapper called on UI thread, this can cause deadlocks");
 
-            var completionLock = new object();
             string result = null;
             Exception error = null;
             var retry = false;
@@ -52,11 +58,21 @@ namespace RainbowMage.OverlayPlugin.Updater
                 request.Headers.Add(key, headers[key]);
             }
 
-            Action action = (async () =>
+            var timeout = downloadDest == null ? AnswerTimeout : DownloadStartTimeout;
+            Func<Task> action = async () =>
             {
                 try
                 {
-                    var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                    HttpResponseMessage response;
+                    using (var cancel = new CancellationTokenSource(timeout))
+                    {
+                        // A short answer is read whole before SendAsync returns, so the timeout covers
+                        // it too; a download's body is read after it, without the timeout.
+                        response = await client.SendAsync(
+                            request,
+                            downloadDest == null ? HttpCompletionOption.ResponseContentRead : HttpCompletionOption.ResponseHeadersRead,
+                            cancel.Token);
+                    }
 
                     if (downloadDest == null)
                     {
@@ -110,22 +126,21 @@ namespace RainbowMage.OverlayPlugin.Updater
                     error = e;
                     retry = true;
                 }
+                catch (OperationCanceledException e)
+                {
+                    error = new TimeoutException($"No answer from {request.RequestUri.Host} within {timeout.TotalSeconds} seconds.", e);
+                    retry = true;
+                }
                 catch (Exception e)
                 {
                     error = e;
                 }
+            };
 
-                lock (completionLock)
-                {
-                    Monitor.Pulse(completionLock);
-                }
-            });
-            action();
-
-            lock (completionLock)
-            {
-                Monitor.Wait(completionLock);
-            }
+            // Fork: waits for the task itself.  The Monitor.Pulse/Wait pair before never woke up
+            // when the request failed before Wait started (e.g. no network), leaving the caller
+            // waiting forever.
+            Task.Run(action).Wait();
 
             if (error != null)
             {
