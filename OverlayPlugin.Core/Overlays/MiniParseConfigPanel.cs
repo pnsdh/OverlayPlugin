@@ -55,6 +55,7 @@ namespace RainbowMage.OverlayPlugin.Overlays
             SetupWebView2Option();
             this.checkLogConsoleMessages.Checked = config.LogConsoleMessages;
             this.tbZoom.Value = config.Zoom;
+            SetupZoomPercentOption();
             this.cbWhiteBg.Checked = config.ForceWhiteBackground;
             this.cbEnableOverlay.Checked = !config.Disabled;
             this.cbMuteHidden.Checked = config.MuteWhenHidden;
@@ -149,6 +150,7 @@ namespace RainbowMage.OverlayPlugin.Overlays
                 this.InvokeIfRequired(() =>
                 {
                     this.tbZoom.Value = this.config.Zoom;
+                    UpdateZoomPercent();
                 });
             };
             this.config.DisabledChanged += (o, e) =>
@@ -224,6 +226,62 @@ namespace RainbowMage.OverlayPlugin.Overlays
         {
             cbMatchRefreshRate.Enabled = !config.UseWebView2;
             nudMaxFrameRate.Enabled = !config.UseWebView2 && !config.MatchRefreshRate;
+        }
+
+        // Fork: the zoom as the scale it gives, which can also be typed in.  Config.Zoom is a
+        // Chromium zoom level times 100: the page is scaled by 1.2 to the power of the level.
+        private NumericUpDown nudZoomPercent;
+
+        private static int ZoomToPercent(int zoom)
+        {
+            return (int)Math.Round(100 * Math.Pow(1.2, zoom / 100.0));
+        }
+
+        private static int PercentToZoom(int percent)
+        {
+            return (int)Math.Round(100 * Math.Log(percent / 100.0) / Math.Log(1.2));
+        }
+
+        private void SetupZoomPercentOption()
+        {
+            nudZoomPercent = new NumericUpDown
+            {
+                Name = "nudZoomPercent",
+                Minimum = ZoomToPercent(tbZoom.Minimum) + 1,
+                Maximum = ZoomToPercent(tbZoom.Maximum),
+                Increment = 5,
+                Width = 60,
+                Anchor = AnchorStyles.Left,
+                TextAlign = HorizontalAlignment.Right,
+            };
+            var percentLabel = new Label
+            {
+                Text = "%",
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+            };
+            tableLayoutPanel4.SuspendLayout();
+            tableLayoutPanel4.ColumnCount = 4;
+            tableLayoutPanel4.ColumnStyles.Insert(1, new ColumnStyle(SizeType.AutoSize));
+            tableLayoutPanel4.ColumnStyles.Insert(2, new ColumnStyle(SizeType.AutoSize));
+            tableLayoutPanel4.SetColumn(btnResetZoom, 3);
+            tableLayoutPanel4.Controls.Add(nudZoomPercent, 1, 0);
+            tableLayoutPanel4.Controls.Add(percentLabel, 2, 0);
+            tableLayoutPanel4.ResumeLayout();
+            UpdateZoomPercent();
+            nudZoomPercent.ValueChanged += (o, e) =>
+            {
+                var percent = (int)nudZoomPercent.Value;
+                if (ZoomToPercent(config.Zoom) != percent)
+                    config.Zoom = PercentToZoom(percent);
+            };
+        }
+
+        private void UpdateZoomPercent()
+        {
+            var percent = Math.Max(nudZoomPercent.Minimum, Math.Min(nudZoomPercent.Maximum, ZoomToPercent(config.Zoom)));
+            if (nudZoomPercent.Value != percent)
+                nudZoomPercent.Value = percent;
         }
 
         // Fork: the renderer of this overlay (see OverlayConfigBase.UseWebView2).
