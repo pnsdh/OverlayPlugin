@@ -18,6 +18,13 @@ namespace RainbowMage.OverlayPlugin.Updater
 
         public static Task<(bool, Version, string, string)> CheckForGitHubUpdate(UpdaterOptions options, TinyIoCContainer container)
         {
+            return CheckForGitHubUpdate(options, container, true);
+        }
+
+        // Fork: automatic checks (showErrors false) only log a failed check.  When GitHub is down,
+        // each plugin using this updater opened an error box at every ACT start.
+        private static Task<(bool, Version, string, string)> CheckForGitHubUpdate(UpdaterOptions options, TinyIoCContainer container, bool showErrors)
+        {
             var logger = container.Resolve<ILogger>();
 
             return Task.Run(() =>
@@ -52,12 +59,7 @@ namespace RainbowMage.OverlayPlugin.Updater
                     }
                     catch (Exception ex)
                     {
-                        MessageBox.Show(
-                            string.Format(Resources.UpdateCheckException, ex.ToString()),
-                            string.Format(Resources.UpdateCheckTitle, options.project),
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Error
-                        );
+                        ReportCheckFailure(logger, showErrors, options, Resources.UpdateCheckException, Resources.UpdateCheckTitle, ex);
                         return (false, null, "", "");
                     }
                 }
@@ -94,15 +96,7 @@ namespace RainbowMage.OverlayPlugin.Updater
                 }
                 catch (Exception ex)
                 {
-                    ActGlobals.oFormActMain.Invoke((Action)(() =>
-                    {
-                        MessageBox.Show(
-                            string.Format(Resources.UpdateParseVersionError, ex.ToString()),
-                            string.Format(Resources.UpdateTitle, options.project),
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Error
-                        );
-                    }));
+                    ReportCheckFailure(logger, showErrors, options, Resources.UpdateParseVersionError, Resources.UpdateTitle, ex);
                     return (false, null, "", "");
                 }
 
@@ -130,6 +124,12 @@ namespace RainbowMage.OverlayPlugin.Updater
 
         public static Task<(bool, Version, string, string)> CheckForManifestUpdate(UpdaterOptions options)
         {
+            return CheckForManifestUpdate(options, null, true);
+        }
+
+        // Fork: see CheckForGitHubUpdate.
+        private static Task<(bool, Version, string, string)> CheckForManifestUpdate(UpdaterOptions options, ILogger logger, bool showErrors)
+        {
             return Task.Run(() =>
             {
                 Version remoteVersion;
@@ -140,12 +140,7 @@ namespace RainbowMage.OverlayPlugin.Updater
                 }
                 catch (HttpClientException ex)
                 {
-                    MessageBox.Show(
-                        string.Format(Resources.UpdateCheckException, ex.ToString()),
-                        string.Format(Resources.UpdateCheckTitle, options.project),
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Error
-                    );
+                    ReportCheckFailure(logger, showErrors, options, Resources.UpdateCheckException, Resources.UpdateCheckTitle, ex);
                     return (false, null, "", "");
                 }
 
@@ -177,20 +172,31 @@ namespace RainbowMage.OverlayPlugin.Updater
                 }
                 catch (Exception ex)
                 {
-                    ActGlobals.oFormActMain.Invoke((Action)(() =>
-                    {
-                        MessageBox.Show(
-                            string.Format(Resources.UpdateParseVersionError, ex.ToString()),
-                            string.Format(Resources.UpdateTitle, options.project),
-                            MessageBoxButtons.OK,
-                            MessageBoxIcon.Error
-                        );
-                    }));
+                    ReportCheckFailure(logger, showErrors, options, Resources.UpdateParseVersionError, Resources.UpdateTitle, ex);
                     return (false, null, "", "");
                 }
 
                 return (remoteVersion.CompareTo(options.currentVersion) > 0, remoteVersion, releaseNotes, downloadUrl);
             });
+        }
+
+        private static void ReportCheckFailure(ILogger logger, bool showErrors, UpdaterOptions options, string format, string title, Exception ex)
+        {
+            if (!showErrors)
+            {
+                logger?.Log(LogLevel.Warning, options.project + ": " + string.Format(format, ex.Message));
+                return;
+            }
+
+            ActGlobals.oFormActMain.Invoke((Action)(() =>
+            {
+                MessageBox.Show(
+                    string.Format(format, ex.ToString()),
+                    string.Format(title, options.project),
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+            }));
         }
 
         public static bool TryRestartACT(bool showIgnoreButton, string message)
@@ -286,11 +292,11 @@ namespace RainbowMage.OverlayPlugin.Updater
 
             if (options.repo != null)
             {
-                (newVersion, remoteVersion, releaseNotes, downloadUrl) = await CheckForGitHubUpdate(options, container);
+                (newVersion, remoteVersion, releaseNotes, downloadUrl) = await CheckForGitHubUpdate(options, container, manualCheck);
             }
             else
             {
-                (newVersion, remoteVersion, releaseNotes, downloadUrl) = await CheckForManifestUpdate(options);
+                (newVersion, remoteVersion, releaseNotes, downloadUrl) = await CheckForManifestUpdate(options, container.Resolve<ILogger>(), manualCheck);
             }
 
             if (remoteVersion != null)
