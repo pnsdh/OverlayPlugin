@@ -401,9 +401,43 @@ namespace RainbowMage.OverlayPlugin
             isDirty = true;
         }
 
+        // Fork: what was last written, to save only when the content changed (see SaveJson).
+        private string lastSavedJson;
+
+        // Fork: overlays whose type couldn't be loaded (e.g. from an addon that isn't installed);
+        // written back unchanged instead of being dropped from the file.
+        private List<JObject> unloadedOverlays = new List<JObject>();
+
         public void SaveJson(bool force = false)
         {
-            if (!force && !isDirty) return;
+            // Convert Overlays
+            OverlayObjects = new List<JObject>(unloadedOverlays);
+
+            foreach (var item in this.Overlays)
+            {
+                var obj = JObject.FromObject(item);
+                obj["$type"] = item.GetType().FullName + ", " + item.GetType().Assembly.GetName();
+                OverlayObjects.Add(obj);
+            }
+
+            string json;
+            using (var writer = new StringWriter())
+            {
+                var serializer = new JsonSerializer();
+                serializer.Formatting = Formatting.Indented;
+                serializer.TypeNameHandling = TypeNameHandling.Auto;
+                serializer.Serialize(writer, this);
+                json = writer.ToString();
+            }
+
+            // Fork: overlay settings and event source configs (e.g. cactbot's options) change
+            // without isDirty, so the periodic save compares the content.  Before, they were only
+            // written when ACT closed normally, and lost when it crashed.
+            if (!force && json == lastSavedJson)
+            {
+                isDirty = false;
+                return;
+            }
 
             // Create a backup of the old config
             if (File.Exists(filePath))
@@ -430,24 +464,34 @@ namespace RainbowMage.OverlayPlugin
                 }
             }
 
-            // Convert Overlays
-            OverlayObjects = new List<JObject>();
-
-            foreach (var item in this.Overlays)
+            // Fork: written to a temporary file that then replaces the config, so a crash or power
+            // loss while writing leaves the previous config whole instead of a truncated one.
+            var tempPath = filePath + ".tmp";
+            using (var file = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                var obj = JObject.FromObject(item);
-                obj["$type"] = item.GetType().FullName + ", " + item.GetType().Assembly.GetName();
-                OverlayObjects.Add(obj);
+                using (var writer = new StreamWriter(file, new UTF8Encoding(false), 4096, true))
+                    writer.Write(json);
+                file.Flush(true);
+            }
+            if (File.Exists(filePath))
+            {
+                try
+                {
+                    File.Replace(tempPath, filePath, null);
+                }
+                catch (IOException)
+                {
+                    // E.g. another program has the file open: copy over it instead.
+                    File.Copy(tempPath, filePath, true);
+                    File.Delete(tempPath);
+                }
+            }
+            else
+            {
+                File.Move(tempPath, filePath);
             }
 
-            using (var stream = new StreamWriter(filePath))
-            {
-                var serializer = new JsonSerializer();
-                serializer.Formatting = Formatting.Indented;
-                serializer.TypeNameHandling = TypeNameHandling.Auto;
-                serializer.Serialize(stream, this);
-            }
-
+            lastSavedJson = json;
             isDirty = false;
         }
 
@@ -492,6 +536,7 @@ namespace RainbowMage.OverlayPlugin
             }
 
             this.OverlayObjects = overlayLeftOvers;
+            this.unloadedOverlays = overlayLeftOvers;
         }
 
         public static PluginConfig LoadJson(string path, TinyIoCContainer container)

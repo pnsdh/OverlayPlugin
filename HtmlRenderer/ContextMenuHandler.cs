@@ -38,7 +38,15 @@ namespace RainbowMage.HtmlRenderer
             }
             else
             {
-                return ctxMenuCallback(parameters.XCoord, parameters.YCoord);
+                // Fork: an exception thrown back into CEF ends ACT.
+                try
+                {
+                    return ctxMenuCallback(parameters.XCoord, parameters.YCoord);
+                }
+                catch (Exception)
+                {
+                    return true;
+                }
             }
         }
     }

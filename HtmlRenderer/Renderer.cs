@@ -115,8 +115,28 @@ namespace RainbowMage.HtmlRenderer
 
         private void _browser_BrowserInitialized(object sender, EventArgs e)
         {
-            // Make sure we use the correct size for rendering. CEF sometimes ignores the size passed in WindowInfo (see BeginRender()).
-            Resize(_target.Width, _target.Height);
+            // Fork: here and in the other CEF event handlers, an exception thrown back into CEF
+            // ends ACT.
+            try
+            {
+                // Make sure we use the correct size for rendering. CEF sometimes ignores the size passed in WindowInfo (see BeginRender()).
+                Resize(_target.Width, _target.Height);
+            }
+            catch (Exception ex)
+            {
+                RaiseCallbackError(ex);
+            }
+        }
+
+        private void RaiseCallbackError(Exception ex)
+        {
+            try
+            {
+                BrowserConsoleLog?.Invoke(this, new BrowserConsoleLogEventArgs(ex.ToString(), "", 1));
+            }
+            catch (Exception)
+            {
+            }
         }
 
         private void Browser_FrameLoadStart(object sender, FrameLoadStartEventArgs e)
@@ -126,22 +146,28 @@ namespace RainbowMage.HtmlRenderer
 
             lastUrl = e.Url;
 
-            if (_api != null)
+            try
             {
-                var initScript = @"(async () => {
-                    await CefSharp.BindObjectAsync('OverlayPluginApi');
-                    OverlayPluginApi.overlayName = " + JsonConvert.SerializeObject(this.overlayName) + @";
-                    OverlayPluginApi.overlayUuid = " + JsonConvert.SerializeObject(this.overlayUuid) + @";
-                    OverlayPluginApi.ready = true;
-                })();";
-                e.Frame.ExecuteJavaScriptAsync(initScript, "init");
-            }
+                if (_api != null)
+                {
+                    var initScript = @"(async () => {
+                        await CefSharp.BindObjectAsync('OverlayPluginApi');
+                        OverlayPluginApi.overlayName = " + JsonConvert.SerializeObject(this.overlayName) + @";
+                        OverlayPluginApi.overlayUuid = " + JsonConvert.SerializeObject(this.overlayUuid) + @";
+                        OverlayPluginApi.ready = true;
+                    })();";
+                    e.Frame.ExecuteJavaScriptAsync(initScript, "init");
+                }
 
-            foreach (var item in this.scriptQueue)
-            {
-                e.Frame.ExecuteJavaScriptAsync(item, "injectOnLoad");
+                foreach (var item in TakeQueuedScripts())
+                {
+                    e.Frame.ExecuteJavaScriptAsync(item, "injectOnLoad");
+                }
             }
-            this.scriptQueue.Clear();
+            catch (Exception ex)
+            {
+                RaiseCallbackError(ex);
+            }
 
             try
             {
@@ -169,8 +195,15 @@ namespace RainbowMage.HtmlRenderer
         {
             // Ignore FLoC exception errors. CEF doesn't include FLoC code which means that it doesn't understand
             // the FLoC exception rule. However, since it can't use FLoC to begin with, that's not an issue either way.
-            if (!e.Message.StartsWith("Error with Permissions-Policy header:"))
-                BrowserConsoleLog?.Invoke(sender, new BrowserConsoleLogEventArgs(e.Message, e.Source, e.Line));
+            try
+            {
+                if (!e.Message.StartsWith("Error with Permissions-Policy header:"))
+                    BrowserConsoleLog?.Invoke(sender, new BrowserConsoleLogEventArgs(e.Message, e.Source, e.Line));
+            }
+            catch (Exception)
+            {
+                // Logging the failure would go through the same handlers.
+            }
         }
 
         private void Browser_FrameLoadEnd(object sender, FrameLoadEndEventArgs e)
@@ -178,14 +211,14 @@ namespace RainbowMage.HtmlRenderer
             if (e.Frame?.IsValid != true || !e.Frame.IsMain)
                 return;
 
-            if (urlToLoad != null)
-            {
-                _browser.Load(urlToLoad);
-                urlToLoad = null;
-            }
-
             try
             {
+                if (urlToLoad != null)
+                {
+                    _browser.Load(urlToLoad);
+                    urlToLoad = null;
+                }
+
                 BrowserLoad?.Invoke(sender, new BrowserLoadEventArgs(e.HttpStatusCode, e.Url));
             }
             catch (Exception ex)
@@ -231,9 +264,8 @@ namespace RainbowMage.HtmlRenderer
             if (_useWebView2)
             {
                 _wv = new WebView2Browser(this, (Form)_target, lastUrl, _api, overlayName, overlayUuid, _ctxMenuCallback, _zoomLevel, _muted);
-                foreach (var script in this.scriptQueue)
+                foreach (var script in TakeQueuedScripts())
                     _wv.ExecuteScript(script);
-                this.scriptQueue.Clear();
                 _wv.Start();
                 return;
             }
@@ -898,7 +930,7 @@ MaxUploadsPerDay=0
                 if (_wv != null)
                     _wv.ExecuteScript(script);
                 else
-                    this.scriptQueue.Add(script);
+                    QueueScript(script);
                 return;
             }
             if (_browser != null && _browser.IsBrowserInitialized)
@@ -907,7 +939,31 @@ MaxUploadsPerDay=0
             }
             else
             {
-                this.scriptQueue.Add(script);
+                QueueScript(script);
+            }
+        }
+
+        // Fork: scripts come from event threads while the page loads on another, so the queue is
+        // locked; and it is capped, as a disabled overlay keeps receiving events it never runs.
+        private const int MaxQueuedScripts = 1000;
+
+        private void QueueScript(string script)
+        {
+            lock (scriptQueue)
+            {
+                if (scriptQueue.Count >= MaxQueuedScripts)
+                    scriptQueue.RemoveAt(0);
+                scriptQueue.Add(script);
+            }
+        }
+
+        private List<string> TakeQueuedScripts()
+        {
+            lock (scriptQueue)
+            {
+                var scripts = new List<string>(scriptQueue);
+                scriptQueue.Clear();
+                return scripts;
             }
         }
 
@@ -1090,7 +1146,14 @@ MaxUploadsPerDay=0
 
         void IRenderWebBrowser.OnCursorChange(IntPtr cursor, CursorType type, CursorInfo customCursorInfo)
         {
-            target.Cursor = new Cursor(cursor);
+            try
+            {
+                target.Cursor = new Cursor(cursor);
+            }
+            catch (Exception)
+            {
+                // Fork: see _browser_BrowserInitialized.
+            }
         }
 
         bool IRenderWebBrowser.GetScreenPoint(int contentX, int contentY, out int screenX, out int screenY)

@@ -584,7 +584,9 @@ namespace RainbowMage.OverlayPlugin
             catch (Exception e)
             {
                 _logger.Log(LogLevel.Error, "SaveConfig: {0}", e);
-                MessageBox.Show(e.ToString());
+                // Fork: only when ACT closes; the periodic save logs and tries again later.
+                if (force)
+                    MessageBox.Show(e.ToString());
             }
         }
 

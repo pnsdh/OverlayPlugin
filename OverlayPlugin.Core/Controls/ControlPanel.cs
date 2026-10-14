@@ -160,9 +160,18 @@ namespace RainbowMage.OverlayPlugin
 
             // Invoke in UI thread if needed to avoid WinForms issues.
             // See https://github.com/OverlayPlugin/OverlayPlugin/issues/254
+            // Fork: posted instead of waited for.  A thread that logs while holding a lock the UI
+            // thread is waiting for (e.g. event dispatch) froze ACT.
             if (ActGlobals.oFormActMain.InvokeRequired)
             {
-                ActGlobals.oFormActMain.Invoke(appendText);
+                try
+                {
+                    ActGlobals.oFormActMain.BeginInvoke(appendText);
+                }
+                catch (InvalidOperationException)
+                {
+                    // ACT's window is gone (closing).
+                }
             }
             else
             {

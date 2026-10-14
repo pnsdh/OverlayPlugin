@@ -440,13 +440,18 @@ namespace RainbowMage.HtmlRenderer
                 return;
             }
             var size = form.ClientSize;
-            if (alphaMap == null || alphaMapSize != size || (DateTime.Now - alphaMapTime).TotalMilliseconds > 500)
+            if (alphaMap == null || alphaMapWindowSize != size || (DateTime.Now - alphaMapTime).TotalMilliseconds > 500)
             {
                 try
                 {
                     using (var bmp = await CapturePage(core, 0, 0, size.Width, size.Height))
+                    {
                         alphaMap = ReadAlpha(bmp);
-                    alphaMapSize = size;
+                        // The capture's own size: with a fractional zoom or DPI scale it can be a
+                        // pixel off the window's.
+                        alphaMapSize = bmp.Size;
+                    }
+                    alphaMapWindowSize = size;
                 }
                 catch (Exception)
                 {
@@ -462,6 +467,7 @@ namespace RainbowMage.HtmlRenderer
 
         private byte[] alphaMap;
         private Size alphaMapSize;
+        private Size alphaMapWindowSize;
         private DateTime alphaMapTime;
 
         private static byte[] ReadAlpha(Bitmap bmp)
