@@ -434,7 +434,29 @@ namespace RainbowMage.OverlayPlugin
         /// </summary>
         public void DeInitPlugin()
         {
+            // Fork: nothing keeps running after the plugin is disabled (it can be enabled again in
+            // the same ACT, which started a second set).
+            initTimer?.Stop();
+            configSaveTimer?.Stop();
+
             SaveConfig(true);
+
+            if (_container.TryResolve(out Registry registry) && registry.EventSources != null)
+            {
+                foreach (var es in registry.EventSources)
+                {
+                    try
+                    {
+                        es?.Stop();
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Log(LogLevel.Error, $"DeInitPlugin: stopping {es?.Name}: {ex}");
+                    }
+                }
+            }
+            if (_container.TryResolve(out OverlayHider hider))
+                hider.Dispose();
 
             if (_container.TryResolve(out OverlayZCorrector corrector))
             {
@@ -574,8 +596,16 @@ namespace RainbowMage.OverlayPlugin
 
                 foreach (var es in registry.EventSources)
                 {
-                    if (es != null)
-                        es.SaveConfig(Config);
+                    // Fork: one event source failing doesn't keep the others' settings unsaved.
+                    try
+                    {
+                        if (es != null)
+                            es.SaveConfig(Config);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.Log(LogLevel.Error, $"SaveConfig: {es?.Name}: {ex}");
+                    }
                 }
 
                 _container.Resolve<BuiltinEventConfig>().SaveConfig(Config);
@@ -584,7 +614,9 @@ namespace RainbowMage.OverlayPlugin
             catch (Exception e)
             {
                 _logger.Log(LogLevel.Error, "SaveConfig: {0}", e);
-                MessageBox.Show(e.ToString());
+                // Fork: only when ACT closes; the periodic save logs and tries again later.
+                if (force)
+                    MessageBox.Show(e.ToString());
             }
         }
 

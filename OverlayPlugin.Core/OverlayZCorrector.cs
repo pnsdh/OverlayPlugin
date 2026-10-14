@@ -56,6 +56,20 @@ namespace RainbowMage.OverlayPlugin
 
         private void EnsureOverlaysAreOverGame(object _)
         {
+            // Fork: an exception thrown from a timer callback ends ACT, e.g. when the overlay list
+            // changes on the UI thread during the loop.
+            try
+            {
+                EnsureOverlaysAreOverGameUnguarded();
+            }
+            catch (Exception ex)
+            {
+                logger.Log(LogLevel.Debug, $"ZReorder: {ex.Message}");
+            }
+        }
+
+        private void EnsureOverlaysAreOverGameUnguarded()
+        {
             var watch = new Stopwatch();
             watch.Start();
 
@@ -72,7 +86,7 @@ namespace RainbowMage.OverlayPlugin
                 overlayWindows.Add(handle);
             }
 
-            foreach (var overlay in main.Overlays)
+            foreach (var overlay in main.Overlays.ToArray())
             {
                 // Fork: Handle is zero for an overlay without a window (closing or being replaced).
                 if (overlay.Handle == IntPtr.Zero)

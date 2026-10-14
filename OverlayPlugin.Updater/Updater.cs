@@ -339,6 +339,21 @@ namespace RainbowMage.OverlayPlugin.Updater
         {
             var logger = container.Resolve<ILogger>();
 
+            // Fork: an exception escaping an async void method ends ACT when it runs on the thread
+            // pool (the General tab's check button).
+            try
+            {
+                await PerformUpdate(pluginDirectory, container, logger, manualCheck);
+            }
+            catch (Exception ex)
+            {
+                logger.Log(LogLevel.Error, $"Update check: {ex}");
+            }
+        }
+
+        private static async Task PerformUpdate(string pluginDirectory, TinyIoCContainer container, ILogger logger, bool manualCheck)
+        {
+
             // e.g. dir/OverlayPlugin/out/Release/OverlayPlugin.dll checking for dir/OverlayPlugin/.git/
             if (Directory.Exists(Path.GetFullPath(Path.Combine(pluginDirectory, "../../.git"))))
             {

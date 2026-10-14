@@ -56,7 +56,13 @@ namespace RainbowMage.OverlayPlugin.Updater
             Directory.Move(oldName, newName);
         }
 
-        public static async Task<bool> Run(string url, string destDir, string tmpName, int stripDirs = 0, bool overwrite = false)
+        public static Task<bool> Run(string url, string destDir, string tmpName, int stripDirs = 0, bool overwrite = false)
+        {
+            return Run(url, destDir, tmpName, stripDirs, overwrite, null);
+        }
+
+        // Fork: sha256, when given, must match the downloaded archive (see CefInstaller).
+        public static async Task<bool> Run(string url, string destDir, string tmpName, int stripDirs, bool overwrite, string sha256)
         {
             var inst = new Installer(destDir, tmpName);
 
@@ -82,6 +88,8 @@ namespace RainbowMage.OverlayPlugin.Updater
                 else
                 {
                     dlResult = inst.Download(url, archivePath);
+                    if (dlResult && sha256 != null)
+                        dlResult = inst.Verify(archivePath, sha256);
                 }
 
                 if (dlResult && inst.Extract(archivePath, stripDirs))
@@ -208,6 +216,21 @@ namespace RainbowMage.OverlayPlugin.Updater
             return true;
         }
 
+        private bool Verify(string archivePath, string sha256)
+        {
+            string actual;
+            using (var file = File.OpenRead(archivePath))
+            using (var hash = System.Security.Cryptography.SHA256.Create())
+                actual = BitConverter.ToString(hash.ComputeHash(file)).Replace("-", "").ToLowerInvariant();
+            if (actual == sha256.ToLowerInvariant())
+                return true;
+
+            _display.Log($"The downloaded file is damaged or not the expected one (SHA-256 {actual}, expected {sha256}).");
+            _display.UpdateStatus(0, Resources.StatusError);
+            Cleanup();
+            return false;
+        }
+
         private bool DlProgressCallback(long resumed, long dltotal, long dlnow, long ultotal, long ulnow)
         {
             var status = string.Format(Resources.StatusDownloadStarted, 1, 2);
@@ -277,7 +300,14 @@ namespace RainbowMage.OverlayPlugin.Updater
                                 }
                             }
 
-                            outPath = Path.Combine(contentsPath, outPath);
+                            outPath = Path.GetFullPath(Path.Combine(contentsPath, outPath));
+                            // Fork: an entry like "../x" would be written outside the folder.
+                            if (!outPath.StartsWith(Path.GetFullPath(contentsPath) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) &&
+                                outPath != Path.GetFullPath(contentsPath))
+                            {
+                                _display.Log($"Skipped an archive entry outside the target folder: {reader.Entry.Key}");
+                                continue;
+                            }
 
                             if (reader.Entry.IsDirectory)
                             {

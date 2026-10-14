@@ -22,6 +22,8 @@ namespace RainbowMage.OverlayPlugin.Updater
         // A download waits up to 30 seconds for the server to answer, then as long as it takes.
         private static readonly TimeSpan AnswerTimeout = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan DownloadStartTimeout = TimeSpan.FromSeconds(30);
+        // A download whose connection stays silent this long is retried.
+        private static readonly TimeSpan DownloadReadTimeout = TimeSpan.FromSeconds(60);
         static HttpClientWrapper()
         {
             client.DefaultRequestHeaders.Add("User-Agent", "OverlayPlugin/OverlayPlugin v" + Assembly.GetExecutingAssembly().GetName().Version.ToString());
@@ -80,6 +82,16 @@ namespace RainbowMage.OverlayPlugin.Updater
                     }
                     else
                     {
+                        // Fork: an error page (e.g. 404 or GitHub being down) isn't saved as the file.
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            var status = (int)response.StatusCode;
+                            error = new HttpRequestException($"{request.RequestUri.Host} answered {status} {response.ReasonPhrase}");
+                            response.Dispose();
+                            retry = status >= 500 || status == 429;
+                            return;
+                        }
+
                         var buffer = new byte[40 * 1024];
                         long length = 0;
 
@@ -89,14 +101,23 @@ namespace RainbowMage.OverlayPlugin.Updater
                             length = nLength.Value;
                         }
 
-                        using (var writer = File.Open(downloadDest, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read))
+                        // Fork: Create, not OpenOrCreate: a retry starts over, and a shorter answer
+                        // than a previous attempt's left that attempt's tail in the file.
+                        using (var writer = File.Open(downloadDest, FileMode.Create, FileAccess.Write, FileShare.Read))
                         using (var body = await response.Content.ReadAsStreamAsync())
                         {
                             var stop = false;
                             var pos = 0;
                             while (!stop)
                             {
-                                var read = await body.ReadAsync(buffer, 0, buffer.Length);
+                                var readTask = body.ReadAsync(buffer, 0, buffer.Length);
+                                if (await Task.WhenAny(readTask, Task.Delay(DownloadReadTimeout)) != readTask)
+                                {
+                                    // Fork: a stalled connection; closing the response ends the read.
+                                    response.Dispose();
+                                    throw new TimeoutException($"No data from {request.RequestUri.Host} for {DownloadReadTimeout.TotalSeconds} seconds.");
+                                }
+                                var read = await readTask;
                                 if (read != 0)
                                 {
                                     writer.Write(buffer, 0, read);
@@ -122,6 +143,11 @@ namespace RainbowMage.OverlayPlugin.Updater
                     retry = true;
                 }
                 catch (HttpRequestException e)
+                {
+                    error = e;
+                    retry = true;
+                }
+                catch (TimeoutException e)
                 {
                     error = e;
                     retry = true;

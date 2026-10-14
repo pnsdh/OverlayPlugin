@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using Advanced_Combat_Tracker;
 using Newtonsoft.Json.Linq;
@@ -294,6 +295,11 @@ namespace RainbowMage.OverlayPlugin
 
         private void GetFFXIVScreenMode(Process process)
         {
+            GetFFXIVScreenMode(process, 0);
+        }
+
+        private void GetFFXIVScreenMode(Process process, int attempt)
+        {
             if (process == null)
             {
                 screenMode = "(not running)";
@@ -303,16 +309,23 @@ namespace RainbowMage.OverlayPlugin
             // If a handler exists when the game is closed and later re-opened, GetFFXIVScreenMode()
             // will be called with the new process before a main window handle is available.
             // In this case, just sleep for 15 seconds and try again.
-            IntPtr mainWindowHandle = process.MainWindowHandle;
+            IntPtr mainWindowHandle;
+            try
+            {
+                mainWindowHandle = process.HasExited ? IntPtr.Zero : process.MainWindowHandle;
+            }
+            catch (Exception)
+            {
+                mainWindowHandle = IntPtr.Zero;
+            }
             if (mainWindowHandle == IntPtr.Zero)
             {
-                Thread.Sleep(15000);
-                mainWindowHandle = process.MainWindowHandle;
-                if (mainWindowHandle == IntPtr.Zero)
-                {
-                    screenMode = "(not running)";
-                    return;
-                }
+                screenMode = "(not running)";
+                // Fork: tried again later instead of sleeping here, which froze ACT for 15 seconds
+                // when this ran on its UI thread.
+                if (attempt < 4)
+                    Task.Delay(15000).ContinueWith(_ => GetFFXIVScreenMode(process, attempt + 1));
+                return;
             }
 
             ulong style = GetWindowLongPtr(mainWindowHandle, -16);

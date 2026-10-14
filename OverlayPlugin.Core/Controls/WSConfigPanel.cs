@@ -198,7 +198,11 @@ namespace RainbowMage.OverlayPlugin
 
                     try
                     {
-                        HttpClientWrapper.Get(MKCERT_DOWNLOAD, new Dictionary<string, string>(), mkcertPath, null, false);
+                        // Fork: downloaded under another name first, so a broken download is
+                        // retried next time instead of being kept as mkcert.exe.
+                        var partPath = mkcertPath + ".download";
+                        HttpClientWrapper.Get(MKCERT_DOWNLOAD, new Dictionary<string, string>(), partPath, null, false);
+                        File.Move(partPath, mkcertPath);
                     }
                     catch (Exception e)
                     {
@@ -577,8 +581,17 @@ version: 2
                     };
 
                     string data = null;
+                    var waitStart = DateTime.Now;
                     while (true)
                     {
+                        // Fork: ngrok exited (e.g. a bad token) or never answers: stop waiting.
+                        if (p.HasExited || (DateTime.Now - waitStart).TotalSeconds > 30)
+                        {
+                            simpLogBox.AppendText("Failed: ngrok didn't start its tunnel.\r\n");
+                            UpdateTunnelStatus(TunnelStatus.Error);
+                            return;
+                        }
+
                         try
                         {
                             data = HttpClientWrapper.Get(apiUrl, headers, null, null, false);
