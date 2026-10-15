@@ -2,7 +2,8 @@
   <PropertyGroup>
     <ProjectGuid>{5D15AD79-050C-4780-986E-0F1138EA1D40}</ProjectGuid>
     <RootNamespace>RainbowMage.OverlayPlugin</RootNamespace>
-    <AssemblyTitle>OverlayPlugin</AssemblyTitle>
+    <!-- Fork: the file's description, so that it can be told from upstream's. -->
+    <AssemblyTitle>OverlayPlugin (커스텀)</AssemblyTitle>
     <Product>OverlayPlugin</Product>
     <Description>Overlay plugin for Advanced Combat Tracker</Description>
     <OutputPath>..\out\$(Configuration)\</OutputPath>
