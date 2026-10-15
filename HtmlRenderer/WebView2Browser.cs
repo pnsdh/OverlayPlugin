@@ -227,7 +227,9 @@ namespace RainbowMage.HtmlRenderer
     typing = now;
     window.chrome.webview.postMessage({ typing: now });
   };
-  document.addEventListener('focusin', update, true);
+  // Checked a moment later: pages copy text by focusing a hidden field and removing it at once
+  // (e.g. click-to-copy), which shouldn't take the focus from the game even briefly.
+  document.addEventListener('focusin', () => setTimeout(update, 0), true);
   document.addEventListener('focusout', () => setTimeout(update, 0), true);
   // Back from another window, a click on the field that still has the page's focus brings no
   // focusin: every press on a text field asks again.
