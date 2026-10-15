@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -293,21 +293,26 @@ namespace RainbowMage.HtmlRenderer
         private const int LoadStartTimeoutMs = 10000;
         private volatile bool loadStarted;
         private bool loadRetried;
+        // The browser being watched, until EndRender (e.g. the overlay disabled meanwhile).
+        private volatile BrowserWrapper watchedBrowser;
 
         private void WatchLoadStart(BrowserWrapper browser)
         {
-            if (loadRetried || !(_target is Control control))
+            // Nothing to load without a URL (e.g. a new overlay): no load would start.
+            if (loadRetried || string.IsNullOrEmpty(lastUrl) || !(_target is Control control))
                 return;
             loadStarted = false;
+            watchedBrowser = browser;
             Task.Delay(LoadStartTimeoutMs).ContinueWith(_ =>
             {
-                if (loadStarted || noMoreRenders || browser != _browser)
+                if (loadStarted || noMoreRenders || browser != _browser || browser != watchedBrowser)
                     return;
                 try
                 {
                     control.BeginInvoke((Action)(() =>
                     {
-                        if (loadStarted || noMoreRenders || browser != _browser || loadRetried)
+                        if (loadStarted || noMoreRenders || browser != _browser ||
+                            browser != watchedBrowser || loadRetried)
                             return;
                         loadRetried = true;
                         BrowserError?.Invoke(this, new BrowserErrorEventArgs(CefErrorCode.None, "The page didn't start loading in " + (LoadStartTimeoutMs / 1000) + "s: making the browser again.", lastUrl));
@@ -333,6 +338,7 @@ namespace RainbowMage.HtmlRenderer
 
         public void EndRender()
         {
+            watchedBrowser = null;
             _wv?.Dispose();
             _wv = null;
             if (_browser != null && _browser.IsBrowserInitialized)
