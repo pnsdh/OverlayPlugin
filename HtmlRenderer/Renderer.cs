@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -144,6 +144,7 @@ namespace RainbowMage.HtmlRenderer
             if (e.Frame?.IsValid != true || !e.Frame.IsMain)
                 return;
 
+            loadStarted = true;
             lastUrl = e.Url;
 
             try
@@ -181,6 +182,9 @@ namespace RainbowMage.HtmlRenderer
 
         private void Browser_LoadError(object sender, LoadErrorEventArgs e)
         {
+            // A load that failed did start (see WatchLoadStart).
+            if (e.Frame?.IsMain == true)
+                loadStarted = true;
             try
             {
                 BrowserError?.Invoke(sender, new BrowserErrorEventArgs(e.ErrorCode, e.ErrorText, e.FailedUrl));
@@ -280,6 +284,43 @@ namespace RainbowMage.HtmlRenderer
 
             cefBrowserSettings.Dispose();
             cefWindowInfo.Dispose();
+            WatchLoadStart(_browser);
+        }
+
+        // Fork: a browser made right after CEF started once never loaded anything (cactbot's
+        // config tab stayed blank until ACT restarted, not reproduced since): made again, once,
+        // if it hasn't started loading after a while.
+        private const int LoadStartTimeoutMs = 10000;
+        private volatile bool loadStarted;
+        private bool loadRetried;
+
+        private void WatchLoadStart(BrowserWrapper browser)
+        {
+            if (loadRetried || !(_target is Control control))
+                return;
+            loadStarted = false;
+            Task.Delay(LoadStartTimeoutMs).ContinueWith(_ =>
+            {
+                if (loadStarted || noMoreRenders || browser != _browser)
+                    return;
+                try
+                {
+                    control.BeginInvoke((Action)(() =>
+                    {
+                        if (loadStarted || noMoreRenders || browser != _browser || loadRetried)
+                            return;
+                        loadRetried = true;
+                        BrowserError?.Invoke(this, new BrowserErrorEventArgs(CefErrorCode.None, "The page didn't start loading in " + (LoadStartTimeoutMs / 1000) + "s: making the browser again.", lastUrl));
+                        _browser = null;
+                        browser.Dispose();
+                        BeginRender();
+                    }));
+                }
+                catch (Exception)
+                {
+                    // The window is gone.
+                }
+            });
         }
 
         // Fork: recreates the browser with CPU frames (OnPaint) after its shared textures failed.
