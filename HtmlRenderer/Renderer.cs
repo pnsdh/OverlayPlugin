@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -696,7 +697,7 @@ namespace RainbowMage.HtmlRenderer
 #else
                 LogSeverity = LogSeverity.Error,
 #endif
-                BrowserSubprocessPath = Path.Combine(cefPath, "CefSharp.BrowserSubprocess.exe"),
+                BrowserSubprocessPath = SubprocessPath(cefPath),
             };
 
             try
@@ -730,6 +731,27 @@ namespace RainbowMage.HtmlRenderer
             }
 
             Cef.Initialize(cefSettings, performDependencyCheck: true, browserProcessHandler: null);
+        }
+
+        // Fork: other programs bundle CefSharp too, and Hancom Office's updater ends every process
+        // named CefSharp.BrowserSubprocess.exe, wherever it runs from, which took the overlays and
+        // then ACT down.  CEF runs a copy under another name instead, kept the same as the original.
+        private const string SubprocessName = "OverlayPlugin.BrowserSubprocess.exe";
+
+        private static string SubprocessPath(string cefPath)
+        {
+            var original = Path.Combine(cefPath, "CefSharp.BrowserSubprocess.exe");
+            var copy = Path.Combine(cefPath, SubprocessName);
+            try
+            {
+                if (!File.Exists(copy) || !File.ReadAllBytes(copy).SequenceEqual(File.ReadAllBytes(original)))
+                    File.Copy(original, copy, true);
+                return copy;
+            }
+            catch (Exception)
+            {
+                return original;
+            }
         }
 
         // Fork: checks for the WebView2 runtime (part of Windows 10/11 through Edge updates).
