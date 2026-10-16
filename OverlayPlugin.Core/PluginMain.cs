@@ -142,7 +142,8 @@ namespace RainbowMage.OverlayPlugin
                 // Fork: for overlays drawn by WebView2 (see OverlayConfigBase.UseWebView2).
                 try
                 {
-                    Renderer.InitializeWebView2(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName);
+                    Renderer.InitializeWebView2(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName, Config.PanelsUseWebView2);
+                    Renderer.PanelsUseWebView2 = Config.PanelsUseWebView2 && Renderer.WebView2Available;
                 }
                 catch (Exception e)
                 {

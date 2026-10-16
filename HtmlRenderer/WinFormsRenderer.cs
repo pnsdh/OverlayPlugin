@@ -9,8 +9,8 @@ namespace RainbowMage.HtmlRenderer
 {
     public class WinFormsRenderer : Renderer
     {
-        public WinFormsRenderer(string overlayName, string overlayUuid, string url, IWinFormsTarget target, object api) :
-            base(overlayName, overlayUuid, url, target, api)
+        public WinFormsRenderer(string overlayName, string overlayUuid, string url, IWinFormsTarget target, object api, bool useWebView2 = false) :
+            base(overlayName, overlayUuid, url, target, api, useWebView2)
         {
             target.Resize += OnResize;
         }

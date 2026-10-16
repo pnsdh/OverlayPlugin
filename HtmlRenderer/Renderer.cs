@@ -36,6 +36,11 @@ namespace RainbowMage.HtmlRenderer
         // CEF starts late (see EnsureCef), so this is also raised when it's known.
         public static string SubprocessStatus { get; private set; } = null;
         public static event Action<string> SubprocessCopyFailed;
+
+        // Fork: plugins' config panels inside ACT's tabs (OverlayControl, e.g. cactbot's config
+        // page) drawn by WebView2 too, rather than CEF (PluginConfig.PanelsUseWebView2).
+        public static bool PanelsUseWebView2 { get; set; } = false;
+
         // Set when this renderer's shared textures failed (e.g. CEF's GPU differs from ours), so
         // its browser is recreated with CPU frames.
         private bool sharedTexturesFailed = false;
@@ -65,7 +70,7 @@ namespace RainbowMage.HtmlRenderer
 
         // Fork: set when this overlay is drawn by WebView2; every method below then goes to _wv
         // instead of CEF.
-        private readonly bool _useWebView2;
+        private bool _useWebView2;
         private WebView2Browser _wv;
         private double _zoomLevel;
         private bool _muted;
@@ -77,12 +82,29 @@ namespace RainbowMage.HtmlRenderer
             this._target = target;
             this.lastUrl = url;
             this._api = api;
-            this._useWebView2 = useWebView2 && WebView2Available && target is Form;
+            this._useWebView2 = useWebView2 && WebView2Available && target is Control;
 
             InitBrowser();
         }
 
         public bool UsesWebView2 => _useWebView2;
+
+        // Fork: a config panel whose WebView2 couldn't start is drawn by CEF (see
+        // WebView2Browser.StartInPanel).
+        internal void FallBackToCef()
+        {
+            if (noMoreRenders || !_useWebView2) return;
+            _useWebView2 = false;
+            // Posted to ACT's UI thread: CEF failing to start too mustn't take it down.
+            try
+            {
+                BeginRender();
+            }
+            catch (Exception ex)
+            {
+                RaiseError("CEF", ex.Message, lastUrl);
+            }
+        }
 
         public void InitBrowser()
         {
@@ -108,6 +130,7 @@ namespace RainbowMage.HtmlRenderer
         public void SetApi(object api)
         {
             _api = api;
+            _wv?.SetApi(api);
             if (api != null && _browser != null)
                 _browser.JavascriptObjectRepository.Register("OverlayPluginApi", api, isAsync: true);
         }
@@ -115,6 +138,7 @@ namespace RainbowMage.HtmlRenderer
         public void SetContextMenuCallback(Func<int, int, bool> ctxMenuCallback)
         {
             _ctxMenuCallback = ctxMenuCallback;
+            _wv?.SetContextMenuCallback(ctxMenuCallback);
             if (_browser != null)
                 _browser.MenuHandler = new ContextMenuHandler(ctxMenuCallback);
         }
@@ -273,7 +297,7 @@ namespace RainbowMage.HtmlRenderer
             EndRender();
             if (_useWebView2)
             {
-                _wv = new WebView2Browser(this, (Form)_target, lastUrl, _api, overlayName, overlayUuid, _ctxMenuCallback, _zoomLevel, _muted);
+                _wv = new WebView2Browser(this, (Control)_target, lastUrl, _api, overlayName, overlayUuid, _ctxMenuCallback, _zoomLevel, _muted);
                 foreach (var script in TakeQueuedScripts())
                     _wv.ExecuteScript(script);
                 _wv.Start();
@@ -772,11 +796,17 @@ namespace RainbowMage.HtmlRenderer
         }
 
         // Fork: checks for the WebView2 runtime (part of Windows 10/11 through Edge updates).
-        public static void InitializeWebView2(string pluginDirectory, string appDataDirectory)
+        public static void InitializeWebView2(string pluginDirectory, string appDataDirectory, bool panels = false)
         {
             var userData = Path.Combine(appDataDirectory, "OverlayPluginWebView2-cbkr");
             if (CachePath != null)
+            {
                 CopyCefStorage(Path.Combine(CachePath, "Default"), Path.Combine(userData, "EBWebView", "Default"));
+                // Config panels' own folder (see WebView2Browser.GetEnvironment), when they use
+                // it: their pages (e.g. cactbot's config) keep what they remembered in CEF then.
+                if (panels)
+                    CopyCefStorage(Path.Combine(CachePath, "Default"), Path.Combine(userData + "-panels", "EBWebView", "Default"));
+            }
             string error;
             var version = WebView2Browser.Initialize(
                 Path.Combine(pluginDirectory, "libs", "runtimes", Environment.Is64BitProcess ? "win-x64" : "win-x86", "native"),

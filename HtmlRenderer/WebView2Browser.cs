@@ -25,23 +25,35 @@ namespace RainbowMage.HtmlRenderer
     // gets the same OverlayPluginApi object through a small script over WebView2's messages.
     // WebView2 doesn't hand over its frames: pixels for hit tests and screenshots come through the
     // DevTools protocol.  All WebView2 calls happen on the window's (ACT's UI) thread.
+    //
+    // Fork: it also draws plugins' config panels inside ACT's tabs (OverlayControl, e.g. cactbot's
+    // config page), as a plain child window that takes its own input, when
+    // Renderer.PanelsUseWebView2 is on.  Only the parts for overlay windows (composition, input
+    // passed on, hit tests, focus) are left out there.
     internal sealed class WebView2Browser : IDisposable
     {
         private static string userDataFolder;
         private static Task<CoreWebView2Environment> environment;
+        // Fork: panels' own (see GetEnvironment).
+        private static Task<CoreWebView2Environment> panelEnvironment;
         private static bool loaderPathSet;
         private static D3D11.Device device;
         private static DComp.Device dcomp;
 
         private readonly Renderer owner;
+        // The control drawn into: the overlay's window (form), or a config panel's control.
+        private readonly Control host;
         private readonly Form form;
-        private readonly object api;
+        private object api;
         private readonly string overlayName;
         private readonly string overlayUuid;
-        private readonly Func<int, int, bool> contextMenuCallback;
+        private Func<int, int, bool> contextMenuCallback;
         private DComp.Target target;
         private DComp.Visual visual;
-        private CoreWebView2CompositionController controller;
+        // A composition controller for an overlay window, a plain one in a panel.
+        private CoreWebView2Controller controller;
+        private CoreWebView2CompositionController Composition => controller as CoreWebView2CompositionController;
+        private bool apiScriptAdded;
         private string url;
         private double zoomFactor = 1;
         private bool muted;
@@ -78,11 +90,12 @@ namespace RainbowMage.HtmlRenderer
             }
         }
 
-        public WebView2Browser(Renderer owner, Form form, string url, object api, string overlayName, string overlayUuid,
+        public WebView2Browser(Renderer owner, Control host, string url, object api, string overlayName, string overlayUuid,
             Func<int, int, bool> contextMenuCallback, double zoomLevel, bool muted)
         {
             this.owner = owner;
-            this.form = form;
+            this.host = host;
+            this.form = host as Form;
             this.url = url ?? "about:blank";
             this.api = api;
             this.overlayName = overlayName;
@@ -90,11 +103,35 @@ namespace RainbowMage.HtmlRenderer
             this.contextMenuCallback = contextMenuCallback;
             this.zoomFactor = ZoomFactor(zoomLevel);
             this.muted = muted;
+            ReadApi();
+        }
+
+        private void ReadApi()
+        {
+            apiMethods.Clear();
             if (api != null)
             {
                 foreach (var method in api.GetType().GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
                     apiMethods[method.Name] = method;
             }
+        }
+
+        // Fork: panels get their API after the browser is made (cactbot's config page: Init,
+        // then MinimalApi.AttachTo).  Once the page has started, it loads again to get it.
+        public void SetApi(object value)
+        {
+            api = value;
+            ReadApi();
+            var core = controller?.CoreWebView2;
+            if (core == null || apiScriptAdded) return;
+            apiScriptAdded = true;
+            var added = core.AddScriptToExecuteOnDocumentCreatedAsync(ApiScript());
+            added.ContinueWith(t => OnUiThread(() => controller?.CoreWebView2?.Reload()));
+        }
+
+        public void SetContextMenuCallback(Func<int, int, bool> value)
+        {
+            contextMenuCallback = value;
         }
 
         // CEF's zoom levels: each step is 20% larger.
@@ -105,6 +142,11 @@ namespace RainbowMage.HtmlRenderer
 
         public async void Start()
         {
+            if (form == null)
+            {
+                StartInPanel();
+                return;
+            }
             try
             {
                 if (dcomp == null)
@@ -117,12 +159,7 @@ namespace RainbowMage.HtmlRenderer
                 visual = new DComp.Visual(dcomp);
                 target.Root = visual;
 
-                if (environment == null)
-                {
-                    var options = new CoreWebView2EnvironmentOptions("--allow-file-access-from-files --autoplay-policy=no-user-gesture-required");
-                    environment = CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
-                }
-                var env = await environment;
+                var env = await GetEnvironment();
                 if (disposed) return;
                 var created = await env.CreateCoreWebView2CompositionControllerAsync(form.Handle);
                 if (disposed)
@@ -131,7 +168,7 @@ namespace RainbowMage.HtmlRenderer
                     return;
                 }
                 controller = created;
-                controller.RootVisualTarget = Marshal.GetObjectForIUnknown(visual.NativePointer);
+                created.RootVisualTarget = Marshal.GetObjectForIUnknown(visual.NativePointer);
                 controller.DefaultBackgroundColor = Color.Transparent;
                 controller.Bounds = new Rectangle(Point.Empty, form.ClientSize);
                 controller.ZoomFactor = zoomFactor;
@@ -147,7 +184,8 @@ namespace RainbowMage.HtmlRenderer
                 core.WebMessageReceived += OnWebMessageReceived;
                 core.ContextMenuRequested += OnContextMenuRequested;
                 core.ProcessFailed += OnProcessFailed;
-                controller.CursorChanged += OnCursorChanged;
+                created.CursorChanged += OnCursorChanged;
+                apiScriptAdded = api != null;
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(ApiScript());
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(TypingScript);
                 await ForwardConsole(core);
@@ -169,6 +207,80 @@ namespace RainbowMage.HtmlRenderer
                 owner.RaiseError("WebView2", ex.Message, url);
                 owner.RaiseConsoleLog("WebView2: " + ex, "internal", 1);
             }
+        }
+
+        // Fork: a config panel: a child window of the control, taking its own mouse, keys and IME
+        // input as any window does.
+        private async void StartInPanel()
+        {
+            try
+            {
+                var env = await GetEnvironment(true);
+                if (disposed) return;
+                var created = await env.CreateCoreWebView2ControllerAsync(host.Handle);
+                if (disposed)
+                {
+                    created.Close();
+                    return;
+                }
+                controller = created;
+                controller.Bounds = new Rectangle(Point.Empty, host.ClientSize);
+                controller.ZoomFactor = zoomFactor;
+                controller.IsVisible = host.Visible;
+
+                var core = controller.CoreWebView2;
+                core.Settings.IsStatusBarEnabled = false;
+                core.Settings.IsZoomControlEnabled = false;
+                // As in CEF: no find bar, printing or reloading by keys (editing keys still work).
+                core.Settings.AreBrowserAcceleratorKeysEnabled = false;
+                core.IsMuted = muted;
+                core.ContentLoading += OnContentLoading;
+                core.NavigationCompleted += OnNavigationCompleted;
+                core.WebMessageReceived += OnWebMessageReceived;
+                core.ContextMenuRequested += OnContextMenuRequested;
+                core.ProcessFailed += OnProcessFailed;
+                if (api != null)
+                {
+                    apiScriptAdded = true;
+                    await core.AddScriptToExecuteOnDocumentCreatedAsync(ApiScript());
+                }
+                await ForwardConsole(core);
+                if (disposed) return;
+
+                host.Resize += OnFormResize;
+                host.VisibleChanged += OnFormVisibleChanged;
+                host.GotFocus += OnHostGotFocus;
+                if (host.ContainsFocus)
+                    OnHostGotFocus(host, EventArgs.Empty);
+                core.Navigate(url);
+            }
+            catch (Exception ex)
+            {
+                if (panelEnvironment != null && panelEnvironment.IsCompleted && (panelEnvironment.IsFaulted || panelEnvironment.IsCanceled))
+                    panelEnvironment = null;
+                owner.RaiseError("WebView2", ex.Message, url);
+                owner.RaiseConsoleLog("WebView2: " + ex, "internal", 1);
+                // Drawn by CEF instead, rather than left blank.
+                OnUiThread(owner.FallBackToCef);
+            }
+        }
+
+        // The environment (browser process) of all overlays, or of all panels.  An environment
+        // that has made a composition controller (an overlay's) refuses to make a windowed one
+        // (0x8007139F, ERROR_INVALID_STATE), and so does another one on its user data folder:
+        // panels have an environment and a folder of their own.
+        private static Task<CoreWebView2Environment> GetEnvironment(bool panels = false)
+        {
+            var options = new CoreWebView2EnvironmentOptions("--allow-file-access-from-files --autoplay-policy=no-user-gesture-required");
+            if (panels)
+            {
+                if (panelEnvironment == null)
+                    panelEnvironment = CoreWebView2Environment.CreateAsync(null, userDataFolder + "-panels", options);
+                return panelEnvironment;
+            }
+            if (environment == null)
+                environment = CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
+            return environment;
         }
 
         // OverlayPluginApi for the page: every public method of the API object, with a function
@@ -348,10 +460,10 @@ namespace RainbowMage.HtmlRenderer
 
         private void OnUiThread(Action action)
         {
-            if (disposed || !form.IsHandleCreated) return;
+            if (disposed || !host.IsHandleCreated) return;
             try
             {
-                form.BeginInvoke((Action)(() =>
+                host.BeginInvoke((Action)(() =>
                 {
                     if (!disposed) action();
                 }));
@@ -462,7 +574,7 @@ namespace RainbowMage.HtmlRenderer
         public async void QueryOpaqueAt(int x, int y, Action<bool> result)
         {
             var core = controller?.CoreWebView2;
-            if (core == null || !navigated)
+            if (core == null || !navigated || form == null)
             {
                 result(false);
                 return;
@@ -552,14 +664,14 @@ namespace RainbowMage.HtmlRenderer
         // so it can't be called there.
         public Bitmap Screenshot()
         {
-            if (!form.InvokeRequired) return null;
+            if (!host.InvokeRequired) return null;
             var done = new TaskCompletionSource<Bitmap>();
             OnUiThread(async () =>
             {
                 try
                 {
                     var core = controller?.CoreWebView2;
-                    done.TrySetResult(core == null ? null : await CapturePage(core, 0, 0, form.ClientSize.Width, form.ClientSize.Height));
+                    done.TrySetResult(core == null ? null : await CapturePage(core, 0, 0, host.ClientSize.Width, host.ClientSize.Height));
                 }
                 catch (Exception ex)
                 {
@@ -592,7 +704,7 @@ namespace RainbowMage.HtmlRenderer
         {
             try
             {
-                controller?.SendMouseInput(kind, keys, data, new Point(x, y));
+                Composition?.SendMouseInput(kind, keys, data, new Point(x, y));
             }
             catch (Exception)
             {
@@ -602,14 +714,14 @@ namespace RainbowMage.HtmlRenderer
 
         private void OnFormResize(object sender, EventArgs e)
         {
-            if (controller != null) controller.Bounds = new Rectangle(Point.Empty, form.ClientSize);
+            if (controller != null) controller.Bounds = new Rectangle(Point.Empty, host.ClientSize);
         }
 
         private void OnCursorChanged(object sender, object e)
         {
             try
             {
-                form.Cursor = new Cursor(controller.Cursor);
+                form.Cursor = new Cursor(Composition.Cursor);
             }
             catch (Exception)
             {
@@ -621,6 +733,7 @@ namespace RainbowMage.HtmlRenderer
         // gets them from Renderer.SendKeyEvent.
         public void ForwardKeyMessage(int msg, IntPtr wParam, IntPtr lParam)
         {
+            if (form == null) return;
             var input = FindInputWindow();
             if (input != IntPtr.Zero)
                 PostMessage(input, msg, wParam, lParam);
@@ -781,7 +894,21 @@ namespace RainbowMage.HtmlRenderer
         // Hidden overlays stop drawing (and run their timers less often), like a hidden Edge tab.
         private void OnFormVisibleChanged(object sender, EventArgs e)
         {
-            if (controller != null) controller.IsVisible = form.Visible;
+            if (controller != null) controller.IsVisible = host.Visible;
+        }
+
+        // A panel's focus goes on to the page's window (e.g. back from another program), or keys
+        // reach the panel and are lost there.
+        private void OnHostGotFocus(object sender, EventArgs e)
+        {
+            try
+            {
+                controller?.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
+            }
+            catch (Exception)
+            {
+                // Its browser process just ended (it is being made again).
+            }
         }
 
         // A new document replaces the page.  Not NavigationStarting: a navigation can still be
@@ -862,10 +989,14 @@ namespace RainbowMage.HtmlRenderer
         {
             if (disposed) return;
             disposed = true;
-            form.Resize -= OnFormResize;
-            form.VisibleChanged -= OnFormVisibleChanged;
-            form.Activated -= OnFormActivated;
-            form.Deactivate -= OnFormDeactivate;
+            host.Resize -= OnFormResize;
+            host.VisibleChanged -= OnFormVisibleChanged;
+            host.GotFocus -= OnHostGotFocus;
+            if (form != null)
+            {
+                form.Activated -= OnFormActivated;
+                form.Deactivate -= OnFormDeactivate;
+            }
             try
             {
                 controller?.Close();

@@ -73,6 +73,36 @@ namespace RainbowMage.OverlayPlugin
             };
             cbErrorReports.Visible = false;
             Controls.Add(cbUseGpu);
+
+            // Fork: config panels drawn by WebView2 (see Renderer.PanelsUseWebView2), below; what
+            // was there moves down a line.
+            const int line = 25;
+            var top = cbHideOverlaysDuringCutscene.Bottom + 8;
+            foreach (Control control in Controls)
+            {
+                if (control.Top >= top)
+                    control.Top += line;
+            }
+            var cbPanels = new CheckBox
+            {
+                Name = "cbPanelsUseWebView2",
+                Text = ko
+                    ? "플러그인 설정 화면(Cactbot 설정 등)도 WebView2로 그리기 (ACT를 다시 시작하면 적용)"
+                    : "Draw plugins' config panels (e.g. cactbot's) with WebView2 too (applies after restarting ACT)",
+                Location = new System.Drawing.Point(cbErrorReports.Left, top),
+                AutoSize = true,
+                UseVisualStyleBackColor = true,
+                Checked = config.PanelsUseWebView2,
+                Enabled = RainbowMage.HtmlRenderer.Renderer.WebView2Available || config.PanelsUseWebView2,
+            };
+            cbPanels.CheckedChanged += (o, e) =>
+            {
+                config.PanelsUseWebView2 = cbPanels.Checked;
+                Updater.Updater.TryRestartACT(true, ko
+                    ? "설정 화면을 그리는 방식은 ACT를 다시 시작해야 바뀝니다."
+                    : "How config panels are drawn changes after restarting ACT.");
+            };
+            Controls.Add(cbPanels);
         }
 
         public void SetReadmeVisible(bool visible)
