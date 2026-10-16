@@ -250,6 +250,8 @@ namespace RainbowMage.HtmlRenderer
                 host.Resize += OnFormResize;
                 host.VisibleChanged += OnFormVisibleChanged;
                 host.GotFocus += OnHostGotFocus;
+                if (host.ContainsFocus)
+                    OnHostGotFocus(host, EventArgs.Empty);
                 core.Navigate(url);
             }
             catch (Exception ex)
@@ -899,7 +901,14 @@ namespace RainbowMage.HtmlRenderer
         // reach the panel and are lost there.
         private void OnHostGotFocus(object sender, EventArgs e)
         {
-            controller?.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
+            try
+            {
+                controller?.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
+            }
+            catch (Exception)
+            {
+                // Its browser process just ended (it is being made again).
+            }
         }
 
         // A new document replaces the page.  Not NavigationStarting: a navigation can still be

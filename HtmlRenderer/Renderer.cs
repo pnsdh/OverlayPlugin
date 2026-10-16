@@ -95,7 +95,15 @@ namespace RainbowMage.HtmlRenderer
         {
             if (noMoreRenders || !_useWebView2) return;
             _useWebView2 = false;
-            BeginRender();
+            // Posted to ACT's UI thread: CEF failing to start too mustn't take it down.
+            try
+            {
+                BeginRender();
+            }
+            catch (Exception ex)
+            {
+                RaiseError("CEF", ex.Message, lastUrl);
+            }
         }
 
         public void InitBrowser()
@@ -788,15 +796,16 @@ namespace RainbowMage.HtmlRenderer
         }
 
         // Fork: checks for the WebView2 runtime (part of Windows 10/11 through Edge updates).
-        public static void InitializeWebView2(string pluginDirectory, string appDataDirectory)
+        public static void InitializeWebView2(string pluginDirectory, string appDataDirectory, bool panels = false)
         {
             var userData = Path.Combine(appDataDirectory, "OverlayPluginWebView2-cbkr");
             if (CachePath != null)
             {
                 CopyCefStorage(Path.Combine(CachePath, "Default"), Path.Combine(userData, "EBWebView", "Default"));
-                // Config panels' own folder (see WebView2Browser.GetEnvironment): their pages
-                // (e.g. cactbot's config) keep what they remembered in CEF.
-                CopyCefStorage(Path.Combine(CachePath, "Default"), Path.Combine(userData + "-panels", "EBWebView", "Default"));
+                // Config panels' own folder (see WebView2Browser.GetEnvironment), when they use
+                // it: their pages (e.g. cactbot's config) keep what they remembered in CEF then.
+                if (panels)
+                    CopyCefStorage(Path.Combine(CachePath, "Default"), Path.Combine(userData + "-panels", "EBWebView", "Default"));
             }
             string error;
             var version = WebView2Browser.Initialize(
