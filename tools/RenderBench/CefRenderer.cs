@@ -51,7 +51,7 @@ sealed class CefRenderer : IRendererUnderTest
             File.Copy(Path.Combine(dir, "CefSharp.BrowserSubprocess.exe"), Path.Combine(dir, subprocess), true);
             settings.BrowserSubprocessPath = Path.Combine(dir, subprocess);
         }
-        if (!Cef.Initialize(settings,performDependencyCheck: true, browserProcessHandler: null))
+        if (!Cef.Initialize(settings, performDependencyCheck: true, browserProcessHandler: null))
             throw new InvalidOperationException("Cef.Initialize failed: " + Cef.GetExitCode());
 
         handler = mode == "cef-shared" ? new SharedTextureHandler(form, w, h) : (HandlerBase)new LayeredHandler(form, w, h);
