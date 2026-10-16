@@ -31,6 +31,9 @@ namespace RainbowMage.HtmlRenderer
         // InitializeWebView2: the runtime's version, or why it can't be used.
         public static bool WebView2Available { get; private set; } = false;
         public static string WebView2Status { get; private set; } = null;
+
+        // Fork: why CEF's subprocess runs under its original name (see SubprocessPath), if it does.
+        public static string SubprocessStatus { get; private set; } = null;
         // Set when this renderer's shared textures failed (e.g. CEF's GPU differs from ours), so
         // its browser is recreated with CPU frames.
         private bool sharedTexturesFailed = false;
@@ -746,10 +749,12 @@ namespace RainbowMage.HtmlRenderer
             {
                 if (!File.Exists(copy) || !File.ReadAllBytes(copy).SequenceEqual(File.ReadAllBytes(original)))
                     File.Copy(original, copy, true);
+                SubprocessStatus = null;
                 return copy;
             }
-            catch (Exception)
+            catch (Exception e)
             {
+                SubprocessStatus = e.Message;
                 return original;
             }
         }

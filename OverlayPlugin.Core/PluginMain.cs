@@ -125,6 +125,9 @@ namespace RainbowMage.OverlayPlugin
                 try
                 {
                     Renderer.Initialize(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName, Config.ErrorReports, Config.UseGpu);
+                    // Fork: see Renderer.SubprocessPath.
+                    if (Renderer.SubprocessStatus != null)
+                        _logger.Log(LogLevel.Warning, "CEF's subprocess couldn't be copied under its own name ({0}); programs that close CefSharp's processes can take the overlays down.", Renderer.SubprocessStatus);
                 }
                 catch (Exception e)
                 {
