@@ -143,6 +143,7 @@ namespace RainbowMage.OverlayPlugin
                 try
                 {
                     Renderer.InitializeWebView2(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName);
+                    Renderer.PanelsUseWebView2 = Config.PanelsUseWebView2 && Renderer.WebView2Available;
                 }
                 catch (Exception e)
                 {

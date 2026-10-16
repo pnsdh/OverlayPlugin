@@ -75,7 +75,8 @@ namespace RainbowMage.HtmlRenderer
                 }
             }
 
-            this.Renderer = new WinFormsRenderer("", "", url, this, api);
+            // Fork: drawn by WebView2 when the option for panels is on (see Renderer.PanelsUseWebView2).
+            this.Renderer = new WinFormsRenderer("", "", url, this, api, RainbowMage.HtmlRenderer.Renderer.PanelsUseWebView2);
             this.Renderer.BeginRender();
 
             this.MaxFrameRate = maxFrameRate;
