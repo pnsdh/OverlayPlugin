@@ -32,6 +32,8 @@ namespace RainbowMage.OverlayPlugin
     {
         private TinyIoCContainer _container;
         private ILogger _logger;
+        // Fork: see InitPlugin; removed in DeInitPlugin (a static event would keep this alive).
+        private Action<string> subprocessCopyFailed;
         TabPage tabPage;
         Label label;
         ControlPanel controlPanel;
@@ -124,6 +126,13 @@ namespace RainbowMage.OverlayPlugin
                 this.label.Text = "Init Phase 1: CEF";
                 try
                 {
+                    // Fork: see Renderer.SubprocessPath (run when CEF starts, after this).  CEF
+                    // still runs when the plugin is enabled again: then it is known already.
+                    subprocessCopyFailed = (error) =>
+                        _logger.Log(LogLevel.Warning, "CEF's subprocess couldn't be copied under its own name ({0}); programs that close CefSharp's processes can take the overlays down.", error);
+                    Renderer.SubprocessCopyFailed += subprocessCopyFailed;
+                    if (Renderer.SubprocessStatus != null)
+                        subprocessCopyFailed(Renderer.SubprocessStatus);
                     Renderer.Initialize(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName, Config.ErrorReports, Config.UseGpu);
                 }
                 catch (Exception e)
@@ -438,6 +447,8 @@ namespace RainbowMage.OverlayPlugin
             // the same ACT, which started a second set).
             initTimer?.Stop();
             configSaveTimer?.Stop();
+            if (subprocessCopyFailed != null)
+                Renderer.SubprocessCopyFailed -= subprocessCopyFailed;
 
             SaveConfig(true);
 

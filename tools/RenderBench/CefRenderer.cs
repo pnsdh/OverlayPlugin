@@ -43,6 +43,14 @@ sealed class CefRenderer : IRendererUnderTest
             var parts = kv.Split(new[] { '=' }, 2);
             settings.CefCommandLineArgs[parts[0]] = parts.Length > 1 ? parts[1] : "1";
         }
+        // RB_SUBPROCESS=<name>: runs the subprocess under another name, as OverlayPlugin does.
+        var subprocess = Environment.GetEnvironmentVariable("RB_SUBPROCESS");
+        if (!string.IsNullOrEmpty(subprocess))
+        {
+            var dir = AppDomain.CurrentDomain.BaseDirectory;
+            File.Copy(Path.Combine(dir, "CefSharp.BrowserSubprocess.exe"), Path.Combine(dir, subprocess), true);
+            settings.BrowserSubprocessPath = Path.Combine(dir, subprocess);
+        }
         if (!Cef.Initialize(settings, performDependencyCheck: true, browserProcessHandler: null))
             throw new InvalidOperationException("Cef.Initialize failed: " + Cef.GetExitCode());
 

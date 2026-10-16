@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
@@ -30,6 +31,11 @@ namespace RainbowMage.HtmlRenderer
         // InitializeWebView2: the runtime's version, or why it can't be used.
         public static bool WebView2Available { get; private set; } = false;
         public static string WebView2Status { get; private set; } = null;
+
+        // Fork: why CEF's subprocess runs under its original name (see SubprocessPath), if it does.
+        // CEF starts late (see EnsureCef), so this is also raised when it's known.
+        public static string SubprocessStatus { get; private set; } = null;
+        public static event Action<string> SubprocessCopyFailed;
         // Set when this renderer's shared textures failed (e.g. CEF's GPU differs from ours), so
         // its browser is recreated with CPU frames.
         private bool sharedTexturesFailed = false;
@@ -696,7 +702,7 @@ namespace RainbowMage.HtmlRenderer
 #else
                 LogSeverity = LogSeverity.Error,
 #endif
-                BrowserSubprocessPath = Path.Combine(cefPath, "CefSharp.BrowserSubprocess.exe"),
+                BrowserSubprocessPath = SubprocessPath(cefPath),
             };
 
             try
@@ -730,6 +736,39 @@ namespace RainbowMage.HtmlRenderer
             }
 
             Cef.Initialize(cefSettings, performDependencyCheck: true, browserProcessHandler: null);
+        }
+
+        // Fork: other programs bundle CefSharp too, and Hancom Office's updater ends every process
+        // named CefSharp.BrowserSubprocess.exe, wherever it runs from, which took the overlays and
+        // then ACT down.  CEF runs a copy under another name instead, kept the same as the original.
+        private const string SubprocessName = "OverlayPlugin.BrowserSubprocess.exe";
+
+        private static string SubprocessPath(string cefPath)
+        {
+            var original = Path.Combine(cefPath, "CefSharp.BrowserSubprocess.exe");
+            var copy = Path.Combine(cefPath, SubprocessName);
+            try
+            {
+                if (!File.Exists(copy) || !File.ReadAllBytes(copy).SequenceEqual(File.ReadAllBytes(original)))
+                    File.Copy(original, copy, true);
+                SubprocessStatus = null;
+                return copy;
+            }
+            catch (Exception e)
+            {
+                // Once, though CEF may be started again after failing.
+                var known = SubprocessStatus == e.Message;
+                SubprocessStatus = e.Message;
+                try
+                {
+                    if (!known)
+                        SubprocessCopyFailed?.Invoke(e.Message);
+                }
+                catch (Exception)
+                {
+                }
+                return original;
+            }
         }
 
         // Fork: checks for the WebView2 runtime (part of Windows 10/11 through Edge updates).
