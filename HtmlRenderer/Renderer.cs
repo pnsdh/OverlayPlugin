@@ -756,10 +756,13 @@ namespace RainbowMage.HtmlRenderer
             }
             catch (Exception e)
             {
+                // Once, though CEF may be started again after failing.
+                var known = SubprocessStatus == e.Message;
                 SubprocessStatus = e.Message;
                 try
                 {
-                    SubprocessCopyFailed?.Invoke(e.Message);
+                    if (!known)
+                        SubprocessCopyFailed?.Invoke(e.Message);
                 }
                 catch (Exception)
                 {
