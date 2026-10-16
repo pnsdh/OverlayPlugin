@@ -124,10 +124,10 @@ namespace RainbowMage.OverlayPlugin
                 this.label.Text = "Init Phase 1: CEF";
                 try
                 {
+                    // Fork: see Renderer.SubprocessPath (run when CEF starts, after this).
+                    Renderer.SubprocessCopyFailed += (error) =>
+                        _logger.Log(LogLevel.Warning, "CEF's subprocess couldn't be copied under its own name ({0}); programs that close CefSharp's processes can take the overlays down.", error);
                     Renderer.Initialize(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName, Config.ErrorReports, Config.UseGpu);
-                    // Fork: see Renderer.SubprocessPath.
-                    if (Renderer.SubprocessStatus != null)
-                        _logger.Log(LogLevel.Warning, "CEF's subprocess couldn't be copied under its own name ({0}); programs that close CefSharp's processes can take the overlays down.", Renderer.SubprocessStatus);
                 }
                 catch (Exception e)
                 {

@@ -33,7 +33,9 @@ namespace RainbowMage.HtmlRenderer
         public static string WebView2Status { get; private set; } = null;
 
         // Fork: why CEF's subprocess runs under its original name (see SubprocessPath), if it does.
+        // CEF starts late (see EnsureCef), so this is also raised when it's known.
         public static string SubprocessStatus { get; private set; } = null;
+        public static event Action<string> SubprocessCopyFailed;
         // Set when this renderer's shared textures failed (e.g. CEF's GPU differs from ours), so
         // its browser is recreated with CPU frames.
         private bool sharedTexturesFailed = false;
@@ -755,6 +757,13 @@ namespace RainbowMage.HtmlRenderer
             catch (Exception e)
             {
                 SubprocessStatus = e.Message;
+                try
+                {
+                    SubprocessCopyFailed?.Invoke(e.Message);
+                }
+                catch (Exception)
+                {
+                }
                 return original;
             }
         }
