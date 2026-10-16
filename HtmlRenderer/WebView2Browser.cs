@@ -231,6 +231,8 @@ namespace RainbowMage.HtmlRenderer
                 var core = controller.CoreWebView2;
                 core.Settings.IsStatusBarEnabled = false;
                 core.Settings.IsZoomControlEnabled = false;
+                // As in CEF: no find bar, printing or reloading by keys (editing keys still work).
+                core.Settings.AreBrowserAcceleratorKeysEnabled = false;
                 core.IsMuted = muted;
                 core.ContentLoading += OnContentLoading;
                 core.NavigationCompleted += OnNavigationCompleted;
@@ -247,6 +249,7 @@ namespace RainbowMage.HtmlRenderer
 
                 host.Resize += OnFormResize;
                 host.VisibleChanged += OnFormVisibleChanged;
+                host.GotFocus += OnHostGotFocus;
                 core.Navigate(url);
             }
             catch (Exception ex)
@@ -255,6 +258,8 @@ namespace RainbowMage.HtmlRenderer
                     panelEnvironment = null;
                 owner.RaiseError("WebView2", ex.Message, url);
                 owner.RaiseConsoleLog("WebView2: " + ex, "internal", 1);
+                // Drawn by CEF instead, rather than left blank.
+                OnUiThread(owner.FallBackToCef);
             }
         }
 
@@ -890,6 +895,13 @@ namespace RainbowMage.HtmlRenderer
             if (controller != null) controller.IsVisible = host.Visible;
         }
 
+        // A panel's focus goes on to the page's window (e.g. back from another program), or keys
+        // reach the panel and are lost there.
+        private void OnHostGotFocus(object sender, EventArgs e)
+        {
+            controller?.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
+        }
+
         // A new document replaces the page.  Not NavigationStarting: a navigation can still be
         // cancelled there (e.g. a download link), which left the page running without its
         // subscriptions and scripts.
@@ -970,6 +982,7 @@ namespace RainbowMage.HtmlRenderer
             disposed = true;
             host.Resize -= OnFormResize;
             host.VisibleChanged -= OnFormVisibleChanged;
+            host.GotFocus -= OnHostGotFocus;
             if (form != null)
             {
                 form.Activated -= OnFormActivated;

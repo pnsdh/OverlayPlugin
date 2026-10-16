@@ -70,7 +70,7 @@ namespace RainbowMage.HtmlRenderer
 
         // Fork: set when this overlay is drawn by WebView2; every method below then goes to _wv
         // instead of CEF.
-        private readonly bool _useWebView2;
+        private bool _useWebView2;
         private WebView2Browser _wv;
         private double _zoomLevel;
         private bool _muted;
@@ -88,6 +88,15 @@ namespace RainbowMage.HtmlRenderer
         }
 
         public bool UsesWebView2 => _useWebView2;
+
+        // Fork: a config panel whose WebView2 couldn't start is drawn by CEF (see
+        // WebView2Browser.StartInPanel).
+        internal void FallBackToCef()
+        {
+            if (noMoreRenders || !_useWebView2) return;
+            _useWebView2 = false;
+            BeginRender();
+        }
 
         public void InitBrowser()
         {
@@ -783,7 +792,12 @@ namespace RainbowMage.HtmlRenderer
         {
             var userData = Path.Combine(appDataDirectory, "OverlayPluginWebView2-cbkr");
             if (CachePath != null)
+            {
                 CopyCefStorage(Path.Combine(CachePath, "Default"), Path.Combine(userData, "EBWebView", "Default"));
+                // Config panels' own folder (see WebView2Browser.GetEnvironment): their pages
+                // (e.g. cactbot's config) keep what they remembered in CEF.
+                CopyCefStorage(Path.Combine(CachePath, "Default"), Path.Combine(userData + "-panels", "EBWebView", "Default"));
+            }
             string error;
             var version = WebView2Browser.Initialize(
                 Path.Combine(pluginDirectory, "libs", "runtimes", Environment.Is64BitProcess ? "win-x64" : "win-x86", "native"),
