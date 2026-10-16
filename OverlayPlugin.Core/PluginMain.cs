@@ -131,7 +131,7 @@ namespace RainbowMage.OverlayPlugin
                     subprocessCopyFailed = (error) =>
                         _logger.Log(LogLevel.Warning, "CEF's subprocess couldn't be copied under its own name ({0}); programs that close CefSharp's processes can take the overlays down.", error);
                     Renderer.SubprocessCopyFailed += subprocessCopyFailed;
-                    if (Renderer.CefStarted && Renderer.SubprocessStatus != null)
+                    if (Renderer.SubprocessStatus != null)
                         subprocessCopyFailed(Renderer.SubprocessStatus);
                     Renderer.Initialize(PluginDirectory, ActGlobals.oFormActMain.AppDataFolder.FullName, Config.ErrorReports, Config.UseGpu);
                 }
