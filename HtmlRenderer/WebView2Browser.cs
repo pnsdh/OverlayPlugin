@@ -34,6 +34,8 @@ namespace RainbowMage.HtmlRenderer
     {
         private static string userDataFolder;
         private static Task<CoreWebView2Environment> environment;
+        // Fork: panels' own (see GetEnvironment).
+        private static Task<CoreWebView2Environment> panelEnvironment;
         private static bool loaderPathSet;
         private static D3D11.Device device;
         private static DComp.Device dcomp;
@@ -213,7 +215,7 @@ namespace RainbowMage.HtmlRenderer
         {
             try
             {
-                var env = await GetEnvironment();
+                var env = await GetEnvironment(true);
                 if (disposed) return;
                 var created = await env.CreateCoreWebView2ControllerAsync(host.Handle);
                 if (disposed)
@@ -249,21 +251,28 @@ namespace RainbowMage.HtmlRenderer
             }
             catch (Exception ex)
             {
-                if (environment != null && environment.IsCompleted && (environment.IsFaulted || environment.IsCanceled))
-                    environment = null;
+                if (panelEnvironment != null && panelEnvironment.IsCompleted && (panelEnvironment.IsFaulted || panelEnvironment.IsCanceled))
+                    panelEnvironment = null;
                 owner.RaiseError("WebView2", ex.Message, url);
                 owner.RaiseConsoleLog("WebView2: " + ex, "internal", 1);
             }
         }
 
-        // The one environment (browser process) of all overlays and panels.
-        private static Task<CoreWebView2Environment> GetEnvironment()
+        // The environment (browser process) of all overlays, or of all panels.  An environment
+        // that has made a composition controller (an overlay's) refuses to make a windowed one
+        // (0x8007139F, ERROR_INVALID_STATE), and so does another one on its user data folder:
+        // panels have an environment and a folder of their own.
+        private static Task<CoreWebView2Environment> GetEnvironment(bool panels = false)
         {
-            if (environment == null)
+            var options = new CoreWebView2EnvironmentOptions("--allow-file-access-from-files --autoplay-policy=no-user-gesture-required");
+            if (panels)
             {
-                var options = new CoreWebView2EnvironmentOptions("--allow-file-access-from-files --autoplay-policy=no-user-gesture-required");
-                environment = CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
+                if (panelEnvironment == null)
+                    panelEnvironment = CoreWebView2Environment.CreateAsync(null, userDataFolder + "-panels", options);
+                return panelEnvironment;
             }
+            if (environment == null)
+                environment = CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
             return environment;
         }
 
