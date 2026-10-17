@@ -9,5 +9,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- The signature library in the ActPluginRepack repo, checked out next to this one. -->
+    <ActPluginDir Condition="'$(ActPluginDir)' == ''">$(MSBuildThisFileDirectory)..\..\..\ACT-Plugin\</ActPluginDir>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(ActPluginDir)lib\FFXIV.Signatures\FFXIV.Signatures\FFXIV.Signatures.csproj" />
+  </ItemGroup>
 </Project>
