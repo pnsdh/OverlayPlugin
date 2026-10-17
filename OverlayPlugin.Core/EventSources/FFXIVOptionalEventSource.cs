@@ -56,6 +56,15 @@ namespace RainbowMage.OverlayPlugin.EventSources
 
         private void LogLineHandler(bool isImport, LogLineEventArgs args)
         {
+            // Fork, for development (HtmlRenderer.LatencyProbe): from the line's time to here.
+            if (RainbowMage.HtmlRenderer.LatencyProbe.Enabled && !isImport)
+            {
+                var ms = (DateTime.Now - args.detectedTime).TotalMilliseconds;
+                var type = args.detectedType;
+                RainbowMage.HtmlRenderer.LatencyProbe.Add(type >= 256 ? "line time -> OverlayPlugin (OverlayPlugin lines 256+)" : "line time -> OverlayPlugin (game lines)", ms);
+                if (type == 21 || type == 22)
+                    RainbowMage.HtmlRenderer.LatencyProbe.Add("line time -> OverlayPlugin (abilities 21/22)", ms);
+            }
             if (isImport)
             {
                 try

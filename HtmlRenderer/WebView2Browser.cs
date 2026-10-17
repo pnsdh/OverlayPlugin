@@ -63,6 +63,7 @@ namespace RainbowMage.HtmlRenderer
         // Scripts from any thread, run together on the UI thread (see ExecuteScript).
         private readonly ConcurrentQueue<string> scripts = new ConcurrentQueue<string>();
         private int scriptFlushQueued;
+        private long scriptFlushQueuedAt; // for LatencyProbe
         // The last button press, to send a second one as a double click (see SendMouseUpDown).
         private DateTime lastDownTime;
         private Point lastDownPosition;
@@ -480,11 +481,22 @@ namespace RainbowMage.HtmlRenderer
         {
             scripts.Enqueue(script);
             if (navigated && System.Threading.Interlocked.Exchange(ref scriptFlushQueued, 1) == 0)
+            {
+                if (LatencyProbe.Enabled)
+                    scriptFlushQueuedAt = System.Diagnostics.Stopwatch.GetTimestamp();
                 OnUiThread(FlushScripts);
+            }
         }
 
         private void FlushScripts()
         {
+            // How long the batch waited for the UI thread.
+            if (LatencyProbe.Enabled)
+            {
+                LatencyProbe.StartUiWatch();
+                LatencyProbe.Add($"wv2 ui-thread wait [{overlayName}]",
+                    (System.Diagnostics.Stopwatch.GetTimestamp() - scriptFlushQueuedAt) * 1000.0 / System.Diagnostics.Stopwatch.Frequency);
+            }
             scriptFlushQueued = 0;
             var core = controller?.CoreWebView2;
             if (core == null || !navigated) return;
@@ -964,6 +976,9 @@ namespace RainbowMage.HtmlRenderer
                     var text = string.Join(" ", ((data["args"] as JArray) ?? new JArray()).Select(a =>
                         a["value"] != null ? (a["value"].Type == JTokenType.String ? (string)a["value"] : a["value"].ToString(Formatting.None)) : (string)a["description"] ?? (string)a["type"]));
                     var frame = data["stackTrace"]?["callFrames"]?.FirstOrDefault();
+                    // The page's own LatencyProbe summaries.
+                    if (LatencyProbe.Enabled && text.StartsWith("[latency]"))
+                        LatencyProbe.Write($"[{overlayName}] {text}");
                     owner.RaiseConsoleLog(text, (string)frame?["url"] ?? "", ((int?)frame?["lineNumber"] ?? 0) + 1);
                 }
                 catch (Exception)
