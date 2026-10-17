@@ -260,10 +260,14 @@ namespace RainbowMage.OverlayPlugin
                     }
                 }
 
-                var opcode = GetOpcode(name, opcodesConfig, version, "config", machinaRegion);
+                // Fork: the file first.  It is what a release ships or what a local patch tool put
+                // there for a new game version; a remote copy is only fetched (and cached until the
+                // next OverlayPlugin version) when something is missing, and before, being looked up
+                // first, it hid any file put in place after it was cached.
+                var opcode = GetOpcode(name, opcodesFile, version, "file", machinaRegion);
                 if (opcode == null)
                 {
-                    opcode = GetOpcode(name, opcodesFile, version, "file", machinaRegion);
+                    opcode = GetOpcode(name, opcodesConfig, version, "config", machinaRegion);
 
                     // Try once to get this remotely, but only if this opcode or version is missing.
                     // TODO: we could consider getting this once always too, but for now
