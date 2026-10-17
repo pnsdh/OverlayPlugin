@@ -21,6 +21,15 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
         // Constants.
         protected const uint emptyID = 0xE0000000;
 
+        // Fork: a list is read many times a second (LineCombatant polls every 20ms), so each thread
+        // reads every actor into one buffer rather than a new one per actor (parsing copies out
+        // what it keeps).
+        [ThreadStatic]
+        private static byte[] actorBuffer;
+        // Fork: set while a list without status effects is read (see GetEffectEntries).
+        [ThreadStatic]
+        private static bool skipEffects;
+
         public CombatantMemory(TinyIoCContainer container, string charmapSignature, int combatantSize, int effectSize, int numMemoryCombatants = 421)
         {
             this.charmapSignature = charmapSignature;
@@ -108,7 +117,12 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
             return GetCombatantFromByteArray(c, selfCharID, false);
         }
 
-        public unsafe List<Combatant> GetCombatantList()
+        public List<Combatant> GetCombatantList()
+        {
+            return GetCombatantList(true);
+        }
+
+        public unsafe List<Combatant> GetCombatantList(bool includeEffects)
         {
             var result = new List<Combatant>();
             var seen = new HashSet<uint>();
@@ -120,24 +134,37 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
             if (source == null || source.Length == 0)
                 return result;
 
-            for (int i = 0; i < numMemoryCombatants; i++)
+            var c = actorBuffer;
+            if (c == null || c.Length != combatantSize)
+                actorBuffer = c = new byte[combatantSize];
+            skipEffects = !includeEffects;
+            try
             {
-                IntPtr p;
-                fixed (byte* bp = source) p = new IntPtr(*(Int64*)&bp[i * sz]);
+                for (int i = 0; i < numMemoryCombatants; i++)
+                {
+                    IntPtr p;
+                    fixed (byte* bp = source) p = new IntPtr(*(Int64*)&bp[i * sz]);
 
-                if (p == IntPtr.Zero)
-                    continue;
+                    if (p == IntPtr.Zero)
+                        continue;
 
-                byte[] c = memory.GetByteArray(p, combatantSize);
-                Combatant combatant = GetMobFromByteArray(c, mychar == null ? 0 : mychar.ID);
-                if (combatant == null)
-                    continue;
-                if (seen.Contains(combatant.ID))
-                    continue;
+                    // Zeros first, like a new array, for what a failed read leaves.
+                    Array.Clear(c, 0, c.Length);
+                    memory.Peek(p, c);
+                    Combatant combatant = GetMobFromByteArray(c, mychar == null ? 0 : mychar.ID);
+                    if (combatant == null)
+                        continue;
+                    if (seen.Contains(combatant.ID))
+                        continue;
 
-                // TODO: should this just be a dictionary? there are a lot of id lookups.
-                result.Add(combatant);
-                seen.Add(combatant.ID);
+                    // TODO: should this just be a dictionary? there are a lot of id lookups.
+                    result.Add(combatant);
+                    seen.Add(combatant.ID);
+                }
+            }
+            finally
+            {
+                skipEffects = false;
             }
 
             return result;
@@ -153,6 +180,8 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
         protected unsafe List<EffectEntry> GetEffectEntries(byte* source, ObjectType type, uint mycharID)
         {
             var result = new List<EffectEntry>();
+            if (skipEffects)
+                return result;
             int maxEffects = (type == ObjectType.PC) ? 30 : 60;
             var size = EffectMemory.Size * maxEffects;
 

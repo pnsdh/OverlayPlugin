@@ -47,7 +47,7 @@ namespace RainbowMage.OverlayPlugin
 
         public void HandleEvent(JObject e)
         {
-            renderer.ExecuteScript("if(window.__OverlayCallback) __OverlayCallback(" + e.ToString(Formatting.None) + ");");
+            renderer.ExecuteScript("if(window.__OverlayCallback) __OverlayCallback(" + EventJson.Of(e) + ");");
         }
 
         // Also handles (un)subscription to make switching between this and WS easier.

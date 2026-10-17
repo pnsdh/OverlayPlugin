@@ -162,12 +162,17 @@ namespace RainbowMage.OverlayPlugin.EventSources
 
                 // @TODO: Technically this event should work fine for any game, not just FFXIV.
                 // Should it be moved to emit right after attempting the split instead?
-                DispatchEvent(JObject.FromObject(new
+                // Fork: only when something receives it, and built directly (the same JSON) rather
+                // than by reflection, for every log line.
+                if (HasSubscriber(LogLineEvent))
                 {
-                    type = LogLineEvent,
-                    line,
-                    rawLine = args.originalLogLine,
-                }));
+                    DispatchEvent(new JObject
+                    {
+                        ["type"] = LogLineEvent,
+                        ["line"] = new JArray(line),
+                        ["rawLine"] = args.originalLogLine,
+                    });
+                }
             }
             catch (Exception e)
             {

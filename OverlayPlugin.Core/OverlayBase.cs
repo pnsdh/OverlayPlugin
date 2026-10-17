@@ -491,7 +491,7 @@ namespace RainbowMage.OverlayPlugin
 
         public virtual void HandleEvent(JObject e)
         {
-            ExecuteScript("if(window.__OverlayCallback) __OverlayCallback(" + e.ToString(Formatting.None) + ");");
+            ExecuteScript("if(window.__OverlayCallback) __OverlayCallback(" + EventJson.Of(e) + ");");
         }
 
         public void Subscribe(string eventType)
