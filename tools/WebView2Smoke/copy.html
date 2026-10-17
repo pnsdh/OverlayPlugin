@@ -1,0 +1,13 @@
+<!doctype html><html><head><style>html,body{margin:0;background:transparent}input{position:absolute;left:20px;top:20px;width:300px;font:20px sans-serif}#row{position:absolute;left:20px;top:100px;width:300px;height:40px;background:#345;color:#fff;font:20px sans-serif}</style></head>
+<body><input id="i"><div id="row">copy me</div><script>
+// Same as oopsy's click-to-copy (ui/oopsyraidsy/oopsy_live_list.ts).
+document.getElementById('row').addEventListener('click', () => {
+  const el = document.createElement('textarea');
+  el.value = '[1:07] copied text';
+  document.body.appendChild(el);
+  el.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(el);
+  console.log('copied ok=' + ok);
+});
+</script></body></html>

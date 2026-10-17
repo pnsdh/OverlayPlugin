@@ -1,0 +1,14 @@
+<!doctype html><html><body style="margin:0;background:#2a6;color:#fff;font:40px sans-serif">config page<script>
+// Like cactbot's config: needs OverlayPluginApi to load its data.
+let tries = 0;
+const wait = () => {
+  if (window.OverlayPluginApi && window.OverlayPluginApi.ready) {
+    console.log('api ready after ' + tries + ' tries');
+    window.OverlayPluginApi.callHandler(JSON.stringify({ call: 'test' }), () => {});
+    return;
+  }
+  if (++tries === 50) console.log('api never ready');
+  else setTimeout(wait, 100);
+};
+wait();
+</script></body></html>
