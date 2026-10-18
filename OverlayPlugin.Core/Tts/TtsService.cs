@@ -654,8 +654,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (TtsUsageCounter.Paid(provider, Settings) && Usage.Get(provider).MonthlyLimit <= 0)
             {
                 PrepareNote = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
-                    ? "유료 서비스는 월 한도를 정해야 미리 만듭니다 (만든 음성·사용량 탭)"
-                    : "A paid service makes ahead only with a monthly limit (Made speech and usage)";
+                    ? "유료 서비스는 월 한도를 정해야 미리 만듭니다 (사용량 탭)"
+                    : "A paid service makes ahead only with a monthly limit (Usage tab)";
                 PrepareProgress = (0, 0);
                 Prepared?.Invoke(0, 0);
                 return;
