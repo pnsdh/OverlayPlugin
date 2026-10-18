@@ -64,6 +64,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         // For the settings' preview: how the last speech went.
         public event Action<TtsResult> Spoken;
 
+        // cactbot's default alert output (e.g. textAndSound), told when it asks what this TTS
+        // takes: with no TTS in it, none of its alerts are read (the settings say so).
+        public string CactbotOutput { get; set; }
+
         // How the chosen slow voice did since ACT started (see TtsStats).
         public TtsStats Stats { get; } = new TtsStats();
 

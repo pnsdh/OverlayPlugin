@@ -160,6 +160,17 @@ static class Program
                 container.Register(new RainbowMage.OverlayPlugin.Tts.TtsService(container, config.Tts));
             return new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
         });
+        Shoot("TtsConfigPanel-cactbot-off", () =>
+        {
+            // TTS on, but cactbot outputs its alerts as text and sound (the warning under the switch).
+            var service = container.Resolve<RainbowMage.OverlayPlugin.Tts.TtsService>();
+            service.CactbotOutput = "textAndSound";
+            config.Tts.Enabled = true;
+            var panel = new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
+            config.Tts.Enabled = false;
+            service.CactbotOutput = null;
+            return panel;
+        });
         Shoot("TtsConfigPanel-network", () =>
         {
             // As with a service chosen (its fields shown instead of Windows' voices).

@@ -19,6 +19,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly ActTtsBridge bridge;
         private readonly IPluginConfig pluginConfig;
         private TrackBar masterBar;
+        private Label cactbotNote;
         private Label statsLabel;
         private Label paidNote;
         private readonly TtsConfig config;
@@ -103,7 +104,17 @@ namespace RainbowMage.OverlayPlugin.Tts
             var basic = Page(T("Voice", "기본"));
             var general = Section(basic, T("Text to speech", "TTS"));
             general.Controls.Add(Check(T("Read alerts with this plugin's TTS (off: ACT's own TTS, as before)", "알림을 이 플러그인의 TTS로 읽기 (끄면 지금까지처럼 ACT의 TTS)"),
-                config.Enabled, v => { config.Enabled = v; ApplyBridge(); Changed(); }));
+                config.Enabled, v => { config.Enabled = v; ApplyBridge(); Changed(); ShowCactbotNote(); }));
+            cactbotNote = new Label
+            {
+                AutoSize = true,
+                MaximumSize = new Size(700, 0),
+                ForeColor = Color.FromArgb(190, 70, 0),
+                Font = new Font(Font, FontStyle.Bold),
+                Margin = new Padding(20, 0, 3, 6),
+                Visible = false,
+            };
+            general.Controls.Add(cactbotNote);
             general.Controls.Add(Check(T("Also read what ACT itself speaks (its custom triggers, other plugins)", "ACT가 읽는 것(커스텀 트리거, 다른 플러그인)도 이 플러그인으로 읽기"),
                 config.TakeOverActTts, v => { config.TakeOverActTts = v; ApplyBridge(); }));
             general.Controls.Add(Check(T("When another plugin speaks for ACT (e.g. TTSYukkuri), send overlays' alerts to it too", "다른 플러그인(TTSYukkuri 등)이 ACT의 TTS를 맡고 있으면 오버레이 알림도 그쪽으로 보내기"),
@@ -994,8 +1005,30 @@ namespace RainbowMage.OverlayPlugin.Tts
             ShowOwner();
         }
 
+        // TTS on, but cactbot outputs its alerts without it: none of them is read (cactbot says how
+        // when it starts; see TtsService.CactbotOutput).
+        private void ShowCactbotNote()
+        {
+            if (cactbotNote == null || cactbotNote.IsDisposed)
+                return;
+            string output = service.CactbotOutput;
+            string name;
+            switch (output)
+            {
+                case "textAndSound": name = T("Text and sound", "텍스트와 소리"); break;
+                case "textOnly": name = T("Text only", "텍스트만"); break;
+                case "disabled": name = T("Disabled", "비활성화"); break;
+                default: name = null; break;
+            }
+            cactbotNote.Visible = config.Enabled && name != null;
+            if (name != null)
+                cactbotNote.Text = T($"cactbot's alerts are not read now: its default alert output is \"{name}\". Set it to \"Text and TTS\" in cactbot's config (Raidboss > Language and output), or with the button in its TTS voice card.",
+                    $"캑봇 알림은 지금 읽지 않습니다. 캑봇의 '기본 알람 출력 방식'이 '{name}'입니다. 캑봇 설정 > 레이드보스 > 언어·출력에서 '텍스트와 TTS'로 바꾸세요 (TTS 음성 칸의 버튼으로도 바꿀 수 있음).");
+        }
+
         private void ShowOwner()
         {
+            ShowCactbotNote();
             if (bridge == null)
                 return;
             string who;
