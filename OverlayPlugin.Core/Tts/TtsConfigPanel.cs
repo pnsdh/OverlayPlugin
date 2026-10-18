@@ -81,9 +81,9 @@ namespace RainbowMage.OverlayPlugin.Tts
             Row(voiceGrid, T("Output", "출력 장치"), Combo(devices, config.OutputDevice, v => config.OutputDevice = (string)v));
 
             // Voices over the network.
-            var network = Section(root, T("Voices over the network", "네트워크 음성"));
+            var network = Section(root, T("Slower voices (network, Supertonic)", "느린 음성 (네트워크, Supertonic)"));
             var networkGrid = Grid(network);
-            Row(networkGrid, T("Windows' voice instead if not ready within", "이 시간 안에 안 오면 Windows 음성으로 대신 읽기"), Seconds(config.FallbackMs, 0.1m, 5, v => config.FallbackMs = v, 0.1m));
+            Row(networkGrid, T("Windows' voice instead if not ready within", "이 시간 안에 준비 안 되면 Windows 음성으로 대신 읽기"), Seconds(config.FallbackMs, 0.1m, 5, v => config.FallbackMs = v, 0.1m));
             var cacheRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             var cacheBox = new NumericUpDown { Minimum = 0, Maximum = 10000, Increment = 50, Width = 80, Value = Math.Max(0, Math.Min(10000, config.DiskCacheMB)) };
             cacheBox.ValueChanged += (o, e) =>
@@ -102,11 +102,11 @@ namespace RainbowMage.OverlayPlugin.Tts
                 service.ClearCaches();
                 ShowCacheSize();
             }));
-            Row(networkGrid, T("Keep fetched speech on disk", "받은 음성을 디스크에 보관"), cacheRow);
-            network.Controls.Add(Hint(T("An alert is fetched (and paid for) once; after that it plays at once, also after restarting ACT.",
-                "한 번 받은 알림은 다시 받지 않고(요금도 한 번) 바로 재생합니다. ACT를 다시 시작해도 남습니다.")));
-            network.Controls.Add(Check(T("On entering a zone, fetch its alerts ahead (so the first time is quick too; each costs once)",
-                "지역에 들어가면 그 지역 알림을 미리 받아 두기 (처음에도 바로 읽음, 요금은 문장마다 한 번)"), config.PrepareAhead, v => config.PrepareAhead = v));
+            Row(networkGrid, T("Keep made speech on disk", "만든 음성을 디스크에 보관"), cacheRow);
+            network.Controls.Add(Hint(T("An alert is made (and, with a paid service, paid for) once; after that it plays at once, also after restarting ACT.",
+                "한 번 만든 알림은 다시 만들지 않고(유료 서비스는 요금도 한 번) 바로 재생합니다. ACT를 다시 시작해도 남습니다.")));
+            network.Controls.Add(Check(T("On entering a zone, make its alerts ahead (so the first time is quick too; a paid service charges each once)",
+                "지역에 들어가면 그 지역 알림을 미리 만들어 두기 (처음에도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => config.PrepareAhead = v));
             prepared = Hint("");
             network.Controls.Add(prepared);
             service.Prepared += OnPrepared;
@@ -196,7 +196,15 @@ namespace RainbowMage.OverlayPlugin.Tts
             providerFields.Controls.Clear();
             var provider = service.Provider;
             var grid = Grid(providerFields);
-            if (!provider.IsRemote)
+            if (provider is ITtsDownloadable downloadable)
+            {
+                // A local model: downloaded only when asked for, then its own settings.
+                providerFields.Controls.Add(DownloadPanel(downloadable));
+                foreach (var field in provider.Fields)
+                    Row(grid, ko ? field.LabelKo : field.Label, FieldControl(provider, field));
+                providerFields.Controls.SetChildIndex(grid, providerFields.Controls.Count - 1);
+            }
+            else if (!provider.IsSlow)
             {
                 var voices = new List<Item> { new Item(T("Automatic (the alert's language)", "자동 (알림 언어에 맞춰)"), "") };
                 voices.AddRange(provider.GetVoices(service.Settings).Select(v => new Item(v.Name, v.Id)));
@@ -211,6 +219,88 @@ namespace RainbowMage.OverlayPlugin.Tts
             }
             providerFields.ResumeLayout();
             loading = wasLoading;
+        }
+
+        private System.Threading.CancellationTokenSource downloading;
+
+        // Download, progress, delete, and what the user agrees to (the model's license).
+        private Control DownloadPanel(ITtsDownloadable model)
+        {
+            var panel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 0, 0, 6) };
+            var status = new Label { AutoSize = true, MaximumSize = new Size(560, 0), Margin = new Padding(3, 3, 3, 3) };
+            var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            Button download = null, cancel = null, delete = null;
+            string Mb(long bytes) => (bytes / 1024.0 / 1024.0).ToString("0");
+            void Show()
+            {
+                if (status.IsDisposed)
+                    return;
+                bool busy = downloading != null;
+                status.Text = model.Ready
+                    ? T($"Downloaded ({Mb(model.SizeOnDisk())} MB on disk). Loaded while chosen (a few hundred MB of memory).",
+                        $"내려받음 (디스크 {Mb(model.SizeOnDisk())}MB). 이 엔진을 고른 동안 메모리를 수백 MB 씁니다.")
+                    : busy ? status.Text
+                    : T($"Not downloaded. About {Mb(model.DownloadSize)} MB, only when you ask for it.",
+                        $"아직 내려받지 않았습니다. 약 {Mb(model.DownloadSize)}MB이며 누를 때만 받습니다.");
+                download.Visible = !model.Ready && !busy;
+                cancel.Visible = busy;
+                delete.Visible = model.Ready && !busy;
+            }
+            download = Button(T("Download", "내려받기"), async () =>
+            {
+                downloading = new System.Threading.CancellationTokenSource();
+                Show();
+                var progress = new Progress<(long Done, long Total)>(p =>
+                {
+                    if (!status.IsDisposed)
+                        status.Text = T($"Downloading... {Mb(p.Done)} / {Mb(p.Total)} MB", $"내려받는 중... {Mb(p.Done)} / {Mb(p.Total)}MB");
+                });
+                try
+                {
+                    await model.Download(progress, downloading.Token);
+                    downloading = null;
+                    service.ConfigChanged();
+                    Show();
+                }
+                catch (Exception ex)
+                {
+                    downloading = null;
+                    Show();
+                    if (!status.IsDisposed)
+                        status.Text = ex is OperationCanceledException
+                            ? T("Download stopped (what came is kept; downloading again goes on from there).", "내려받기를 멈췄습니다 (받은 파일은 남아 있어 다시 누르면 이어서 받습니다).")
+                            : T("Download failed: ", "내려받지 못했습니다: ") + ex.GetBaseException().Message;
+                }
+            });
+            cancel = Button(T("Stop", "멈추기"), () => downloading?.Cancel());
+            delete = Button(T("Delete", "지우기"), () =>
+            {
+                try
+                {
+                    model.Delete();
+                    Show();
+                }
+                catch (Exception ex)
+                {
+                    status.Text = T("Could not delete everything (in use: restart ACT, then delete again): ", "모두 지우지 못했습니다 (사용 중: ACT를 다시 시작한 뒤 다시 지우세요): ") + ex.Message;
+                }
+            });
+            buttons.Controls.Add(download);
+            buttons.Controls.Add(cancel);
+            buttons.Controls.Add(delete);
+            var license = new LinkLabel
+            {
+                AutoSize = true,
+                Text = T("Model license (OpenRAIL-M): downloading means you accept it", "모델 라이선스 (OpenRAIL-M): 내려받으면 이 조건에 동의하는 것입니다"),
+                Margin = new Padding(3, 0, 3, 3),
+            };
+            license.LinkClicked += (o, e) => System.Diagnostics.Process.Start(model.LicenseUrl);
+            panel.Controls.Add(status);
+            panel.Controls.Add(buttons);
+            panel.Controls.Add(license);
+            panel.Controls.Add(Hint(T("Kept in ", "저장 위치: ") + model.Folder));
+            Show();
+            return panel;
         }
 
         private Control FieldControl(ITtsProvider provider, TtsField field)
@@ -381,7 +471,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 if (IsDisposed)
                     return;
-                prepared.Text = total == 0 ? "" : T($"Fetched ahead for this zone: {done} of {total}", $"이 지역 알림 미리 받기: {done}/{total}");
+                prepared.Text = total == 0 ? "" : T($"Made ahead for this zone: {done} of {total}", $"이 지역 알림 미리 만들기: {done}/{total}");
             }
             if (IsHandleCreated && InvokeRequired)
                 BeginInvoke((Action)Show);

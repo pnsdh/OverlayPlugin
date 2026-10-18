@@ -143,6 +143,15 @@ static class Program
             config.Tts.Provider = "sapi";
             return panel;
         });
+        Shoot("TtsConfigPanel-supertonic", () =>
+        {
+            // A model downloaded on request: download panel, then its settings.
+            config.Tts.Provider = "supertonic";
+            container.Resolve<RainbowMage.OverlayPlugin.Tts.TtsService>().ConfigChanged();
+            var panel = new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
+            config.Tts.Provider = "sapi";
+            return panel;
+        });
         Shoot("WSConfigPanel", () => new WSConfigPanel(container));
         Shoot("BuiltinEventConfigPanel", () =>
         {

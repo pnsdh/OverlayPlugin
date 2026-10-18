@@ -25,6 +25,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly TtsPlayer player;
         private readonly TtsDiskCache disk;
         private readonly SapiProvider windows = new SapiProvider();
+        private readonly Supertonic.SupertonicProvider supertonic = new Supertonic.SupertonicProvider();
         private readonly Dictionary<string, ITtsProvider> providers = new Dictionary<string, ITtsProvider>();
 
         private readonly object sync = new object();
@@ -69,6 +70,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             AddProvider(new ElevenLabsProvider());
             AddProvider(new ClovaProvider());
             AddProvider(new HttpTemplateProvider());
+            AddProvider(supertonic);
             worker = new Thread(Run) { IsBackground = true, Name = "OverlayPlugin TTS" };
             worker.Start();
         }
@@ -111,7 +113,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private TtsVoice VoiceFor(ITtsProvider provider, string lang)
         {
             var voices = provider.GetVoices(provider == Provider ? Settings : new TtsSettings(provider, config));
-            if (provider.IsRemote)
+            if (provider.IsSlow)
                 return voices.FirstOrDefault();
             return voices.FirstOrDefault(v => v.Id == config.Voice)
                 ?? voices.FirstOrDefault(v => v.Lang == lang)
@@ -141,6 +143,17 @@ namespace RainbowMage.OverlayPlugin.Tts
                 processor = null;
                 settings = null;
             }
+            LoadOrUnload();
+        }
+
+        // A local model chosen is loaded ahead (the first alert would wait seconds for it), and
+        // unloaded when another voice is chosen (its memory back).
+        public void LoadOrUnload()
+        {
+            if (config.Enabled && Provider == supertonic)
+                supertonic.Warm(Settings);
+            else
+                supertonic.Unload();
         }
 
         public void ClearCaches()
@@ -208,6 +221,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private void Run()
         {
             Warm();
+            LoadOrUnload();
             while (!stopping)
             {
                 Request next;
@@ -326,7 +340,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             preparing?.Cancel();
             var provider = Provider;
-            if (!config.PrepareAhead || !provider.IsRemote || stopping)
+            if (!config.PrepareAhead || !provider.IsSlow || stopping)
                 return;
             var cancel = (preparing = new CancellationTokenSource()).Token;
             var s = Settings;
@@ -345,7 +359,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 try
                 {
-                    Parallel.ForEach(todo, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = cancel }, (x, state) =>
+                    System.Threading.Tasks.Parallel.ForEach(todo, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, provider.Parallel), CancellationToken = cancel }, (x, state) =>
                     {
                         try
                         {
@@ -390,7 +404,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 return kept;
             }
             var synthesis = new TtsSynthesis { Text = request.Spoken, Voice = voice, Rate = config.Rate, Lang = lang, Settings = s };
-            if (!provider.IsRemote)
+            if (!provider.IsSlow)
                 return Keep(key, provider.Synthesize(synthesis, CancellationToken.None), false);
 
             kept = disk.Get(key);

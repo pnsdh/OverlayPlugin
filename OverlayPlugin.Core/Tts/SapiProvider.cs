@@ -17,7 +17,8 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         public string Id => ProviderId;
         public string Name => "Windows";
-        public bool IsRemote => false;
+        public bool IsSlow => false;
+        public int Parallel => 1;
         public IReadOnlyList<TtsField> Fields { get; } = new TtsField[0];
 
         private SpeechSynthesizer synth;

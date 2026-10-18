@@ -6,8 +6,8 @@ namespace RainbowMage.OverlayPlugin.Tts
     // Fork: what reads alerts aloud (see TtsService), saved in the plugin config.
     public class TtsConfig
     {
-        // Off: everything goes to ACT's own TTS, as before.
-        public bool Enabled { get; set; } = true;
+        // Off (as it starts): everything goes to ACT's own TTS, as before.
+        public bool Enabled { get; set; } = false;
 
         // Also read what ACT itself speaks (its custom triggers, other plugins), unless another
         // plugin has already taken ACT's TTS over (see ActTtsBridge).

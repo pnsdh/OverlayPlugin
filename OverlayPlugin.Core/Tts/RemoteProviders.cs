@@ -18,7 +18,8 @@ namespace RainbowMage.OverlayPlugin.Tts
     {
         public abstract string Id { get; }
         public abstract string Name { get; }
-        public bool IsRemote => true;
+        public bool IsSlow => true;
+        public int Parallel => 2;
         public abstract IReadOnlyList<TtsField> Fields { get; }
 
         // The voice set in the settings (remote voices are not listed until fetched).

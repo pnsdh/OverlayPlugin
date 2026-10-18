@@ -82,6 +82,8 @@ namespace RainbowMage.OverlayPlugin.Tts
     public static class TtsHttp
     {
         public static readonly HttpClient Client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        // For big downloads (a model): no time limit, cancelled by the user instead.
+        public static readonly HttpClient LongClient = new HttpClient { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
 
         static TtsHttp()
         {

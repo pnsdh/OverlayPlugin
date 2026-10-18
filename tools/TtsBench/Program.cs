@@ -32,6 +32,8 @@ static class Program
 
     static int Run(string[] args)
     {
+        if (args.Contains("--supertonic"))
+            return SupertonicTest(args.Contains("--keep"));
         Console.OutputEncoding = System.Text.Encoding.UTF8;
         string Opt(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
         int volume = int.TryParse(Opt("--volume"), out var v) ? v : 0;
@@ -189,6 +191,78 @@ static class Program
         listener.Stop();
         Console.WriteLine($"  disk cache: {cacheDir}");
         return 0;
+    }
+
+    // Supertonic end to end: the download (each file checked), loading, then Korean alerts: how
+    // long each takes (first and again), how long the speech is, whether it is sound (not silence
+    // or NaN), and the process' memory.  The download is deleted afterwards unless --keep.
+    static int SupertonicTest(bool keep)
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        var provider = new RainbowMage.OverlayPlugin.Tts.Supertonic.SupertonicProvider();
+        Console.WriteLine($"folder {provider.Folder}, ready {provider.Ready}");
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        long last = -1;
+        provider.Download(new Progress<(long Done, long Total)>(p =>
+        {
+            long step = p.Done * 10 / Math.Max(1, p.Total);
+            if (step != last)
+            {
+                last = step;
+                Console.WriteLine($"  {p.Done / 1048576} / {p.Total / 1048576} MB");
+            }
+        }), CancellationToken.None).GetAwaiter().GetResult();
+        Console.WriteLine($"downloaded in {sw.Elapsed.TotalSeconds:0} s, ready {provider.Ready}");
+
+        var container = new TinyIoCContainer();
+        container.Register<ILogger>(new Logger());
+        var config = new TtsConfig { Enabled = true, Provider = "supertonic" };
+        var settings = new TtsSettings(provider, config);
+        var proc = System.Diagnostics.Process.GetCurrentProcess();
+        long before = proc.PrivateMemorySize64;
+        sw.Restart();
+        var warm = provider.Synthesize(new TtsSynthesis { Text = "준비", Lang = "ko", Rate = 0, Settings = settings }, CancellationToken.None);
+        proc.Refresh();
+        Console.WriteLine($"loaded + first text in {sw.ElapsedMilliseconds} ms, memory +{(proc.PrivateMemorySize64 - before) / 1048576} MB");
+        foreach (var steps in new[] { "3", "5", "8" })
+        {
+            config.ProviderSettings["supertonic"] = new Dictionary<string, string> { ["steps"] = steps, ["voice"] = "F1", ["threads"] = "2" };
+            settings = new TtsSettings(provider, config);
+            foreach (var text in new[] { "산개", "보스 뒤로 이동", "탱버 두 번, 다음 쉐어 모이기", "보스와 멀리 떨어지기 다음 행동 멈추기" })
+            {
+                var cpu = proc.TotalProcessorTime;
+                sw.Restart();
+                var clip = provider.Synthesize(new TtsSynthesis { Text = text, Lang = "ko", Rate = 0, Settings = settings }, CancellationToken.None);
+                long ms = sw.ElapsedMilliseconds;
+                proc.Refresh();
+                double rms = Math.Sqrt(clip.Samples.Select(x => (double)x * x).Average());
+                bool nan = clip.Samples.Any(x => float.IsNaN(x) || float.IsInfinity(x));
+                Console.WriteLine($"  steps {steps}: {ms,5} ms (cpu {(proc.TotalProcessorTime - cpu).TotalMilliseconds,5:0} ms) speech {clip.Samples.Length / (double)clip.SampleRate:0.00} s rms {rms:0.000}{(nan ? " NaN!" : "")}  {text}");
+                if (steps == "5" && text.StartsWith("보스와"))
+                    File.WriteAllBytes(Path.Combine(Path.GetTempPath(), "supertonic-test.wav"), WavOf(clip));
+            }
+        }
+        provider.Dispose();
+        if (!keep)
+        {
+            try { provider.Delete(); Console.WriteLine("deleted"); }
+            catch (Exception e) { Console.WriteLine("delete after exit (runtime loaded): " + e.Message); }
+        }
+        return 0;
+    }
+
+    static byte[] WavOf(TtsClip clip)
+    {
+        var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        int n = clip.Samples.Length;
+        w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF")); w.Write(36 + n * 2);
+        w.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt ")); w.Write(16); w.Write((short)1); w.Write((short)1);
+        w.Write(clip.SampleRate); w.Write(clip.SampleRate * 2); w.Write((short)2); w.Write((short)16);
+        w.Write(System.Text.Encoding.ASCII.GetBytes("data")); w.Write(n * 2);
+        foreach (var x in clip.Samples)
+            w.Write((short)(Math.Max(-1, Math.Min(1, x)) * 32767));
+        return ms.ToArray();
     }
 
     // A WAV of a short tone at 24 kHz.

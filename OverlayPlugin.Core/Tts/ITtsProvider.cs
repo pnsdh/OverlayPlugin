@@ -3,16 +3,20 @@ using System.Threading;
 
 namespace RainbowMage.OverlayPlugin.Tts
 {
-    // Fork: a source of voices.  A local one (IsRemote false) is called on the TTS worker thread
-    // only, one call at a time; a remote one (over the network) may be called from several
-    // threads at once, as a slow answer must not hold the next alert.
+    // Fork: a source of voices.  A quick one (IsSlow false) is called on the TTS worker thread
+    // only, one call at a time; a slow one (over the network, or heavy on the CPU) may be called
+    // from several threads at once, as a slow answer must not hold the next alert.
     public interface ITtsProvider
     {
         string Id { get; }
         string Name { get; }
 
-        // Over the network: speech is kept on disk, and Windows' voice says it when slow.
-        bool IsRemote { get; }
+        // Slow (over the network, or a heavy local model): speech is kept on disk, fetched
+        // ahead, and Windows' voice says it when it is late.
+        bool IsSlow { get; }
+
+        // How many texts it makes at once when fetching ahead.
+        int Parallel { get; }
 
         // What the user sets for it (address, key, voice...), shown in the TTS tab.
         IReadOnlyList<TtsField> Fields { get; }
@@ -23,6 +27,18 @@ namespace RainbowMage.OverlayPlugin.Tts
         // The speech, or null if this provider cannot say it.  Throws with a readable message
         // when it fails (bad key, no network...).
         TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel);
+    }
+
+    // A provider whose files are downloaded on the user's request (e.g. a local model).
+    public interface ITtsDownloadable
+    {
+        bool Ready { get; }
+        long DownloadSize { get; }
+        long SizeOnDisk();
+        string LicenseUrl { get; }
+        string Folder { get; }
+        System.Threading.Tasks.Task Download(System.IProgress<(long Done, long Total)> progress, CancellationToken cancel);
+        void Delete();
     }
 
     // A provider that can list its voices from the service (with the user's key).

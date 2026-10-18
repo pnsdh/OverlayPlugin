@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="OverlayPlugin.Core"><HintPath>$(PluginLibs)OverlayPlugin.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Microsoft.ML.OnnxRuntime"><HintPath>$(PluginLibs)Microsoft.ML.OnnxRuntime.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="Newtonsoft.Json"><HintPath>$(PluginLibs)Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="OverlayPlugin.Common"><HintPath>$(PluginLibs)OverlayPlugin.Common.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
