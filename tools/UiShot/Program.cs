@@ -13,10 +13,12 @@ using RainbowMage.OverlayPlugin.Controls;
 using RainbowMage.OverlayPlugin.Overlays;
 
 // Pictures of OverlayPlugin's settings panels, as ACT shows them, without ACT and without showing a
-// window: the panels are built with stand-in objects (default settings) in the given language and
-// drawn to PNG files, a tab page per file.  For checking layout and translations after a change.
+// window (dialogs are shown off screen for a moment): the panels are built with stand-in objects
+// (default settings) in the given language and drawn to PNG files, a tab page per file.  For
+// checking layout and translations after a change.
 //
-// UiShot.exe <out folder> [ko-KR|en|...] [width] [height]
+// UiShot.exe <out folder> [ko-KR|en|...] [width] [height]   (UISHOT_TRACE=1: full errors)
+// UiShot.exe techsupport [extra overlays]                   the tech support text from sample data
 // Needs the plugin built (out\Release\libs).
 static class Program
 {
@@ -35,19 +37,29 @@ static class Program
         string cef = Environment.GetEnvironmentVariable("OP_CEF") ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Advanced Combat Tracker", "OverlayPluginCef-cbkr", "x64");
         Environment.SetEnvironmentVariable("PATH", cef + ";" + Environment.GetEnvironmentVariable("PATH"));
+        // ACT itself, the copy the plugin is built against.
+        string act = Path.GetFullPath(Path.Combine(libs, @"..\..\..\Thirdparty\ACT"));
         AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
         {
-            foreach (string dir in new[] { libs, cef })
-            {
-                string file = Path.Combine(dir, new AssemblyName(e.Name).Name + ".dll");
-                if (File.Exists(file))
-                    return Assembly.LoadFrom(file);
-            }
+            // A short name (e.g. "System.Drawing" in a Korean designer resource) means the one
+            // already loaded, as the plugin loader in ACT does.
+            var loaded = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == new AssemblyName(e.Name).Name);
+            if (loaded != null)
+                return loaded;
+            foreach (string dir in new[] { libs, cef, act })
+                foreach (string ext in new[] { ".dll", ".exe" })
+                {
+                    string file = Path.Combine(dir, new AssemblyName(e.Name).Name + ext);
+                    if (File.Exists(file))
+                        return Assembly.LoadFrom(file);
+                }
             return null;
         };
         Thread.CurrentThread.CurrentUICulture = new CultureInfo(culture);
         Thread.CurrentThread.CurrentCulture = new CultureInfo(culture);
         Application.EnableVisualStyles();
+        // Designer resources that need a type looked up (e.g. TableLayoutSettings) are read only with this on.
+        AppContext.SetSwitch("System.Resources.ResourceManager.AllowCustomResourceTypes", true);
         if (sample)
             return TechSupportSample(args.Length > 1 ? int.Parse(args[1]) : 5);
         Directory.CreateDirectory(outDir);
@@ -68,6 +80,27 @@ static class Program
         container.Register(config);
         container.Register<IPluginConfig>(config);
         container.Register(Stub<KeyboardHook>());
+        // ACT's main window, only for the folder it keeps its settings in (looked up by some panels).
+        var act = Stub<Advanced_Combat_Tracker.FormActMain>();
+        SetMember(act, "AppDataFolder", new DirectoryInfo(Path.Combine(Path.GetTempPath(), "uishot-act")));
+        Advanced_Combat_Tracker.ActGlobals.oFormActMain = act;
+        var registry = new Registry(container);
+        container.Register(registry);
+        registry.RegisterOverlay<MiniParseOverlay>();
+        registry.RegisterOverlay<SpellTimerOverlay>();
+        registry.RegisterOverlay<LabelOverlay>();
+        registry.RegisterOverlay<LogParseOverlay>();
+        var presetType = typeof(PluginConfig).Assembly.GetType("RainbowMage.OverlayPlugin.OverlayPreset");
+        var presetFile = Path.Combine(libs, @"..\..\..\OverlayPlugin.Core\resources\presets.json");
+        var presets = Newtonsoft.Json.Linq.JObject.Parse(File.ReadAllText(presetFile));
+        foreach (var pair in presets)
+        {
+            var preset = (IOverlayPreset)pair.Value.ToObject(presetType);
+            SetMember(preset, "Name", pair.Key);
+            registry.RegisterOverlayPreset2(preset);
+        }
+        container.Register(new WSServer(container));
+        container.Register(new RainbowMage.OverlayPlugin.EventSources.BuiltinEventConfig());
 
         int failed = 0;
         void Shoot(string name, Func<Control> make)
@@ -80,7 +113,7 @@ static class Program
             catch (Exception e)
             {
                 failed++;
-                Console.WriteLine($"{name}: {e.GetBaseException().GetType().Name}: {e.GetBaseException().Message}");
+                Console.WriteLine($"{name}: {e.GetBaseException().GetType().Name}: {e.GetBaseException().Message}"); if (Environment.GetEnvironmentVariable("UISHOT_TRACE") != null) Console.WriteLine(e);
             }
         }
 
@@ -92,7 +125,55 @@ static class Program
             SetProperty(overlay, "Config", overlayConfig);
             return new MiniParseConfigPanel(container, overlay);
         });
+        Shoot("WSConfigPanel", () => new WSConfigPanel(container));
+        Shoot("BuiltinEventConfigPanel", () =>
+        {
+            // Internal to the plugin.
+            var type = typeof(PluginConfig).Assembly.GetType("RainbowMage.OverlayPlugin.EventSources.BuiltinEventConfigPanel");
+            var panel = (Control)Activator.CreateInstance(type, container);
+            // Its values are filled in once the event sources have started.
+            var started = (EventHandler)typeof(Registry).GetField("EventSourcesStarted", BindingFlags.Instance | BindingFlags.NonPublic).GetValue(registry);
+            started?.Invoke(registry, EventArgs.Empty);
+            return panel;
+        });
+        Shoot("ControlPanel", () => new ControlPanel(container));
+        try { ShootDialog(outDir, $"NewOverlayDialog.{culture}", new NewOverlayDialog(container)); }
+        catch (Exception e) { failed++; Console.WriteLine($"NewOverlayDialog: {e.GetBaseException().Message}"); }
+        try { ShootDialog(outDir, $"RenameOverlayDialog.{culture}", new RenameOverlayDialog("Raidboss : Timeline")); }
+        catch (Exception e) { failed++; Console.WriteLine($"RenameOverlayDialog: {e.GetBaseException().Message}"); }
+        try { ShootDialog(outDir, $"ConfigErrorPrompt.{culture}", new ConfigErrorPrompt()); }
+        catch (Exception e) { failed++; Console.WriteLine($"ConfigErrorPrompt: {e.GetBaseException().Message}"); }
+        Shoot("SpellTimerConfigPanel", () =>
+        {
+            var overlay = Stub<SpellTimerOverlay>();
+            SetProperty(overlay, "Config", new SpellTimerOverlayConfig("Spell Timer"));
+            return new SpellTimerConfigPanel(overlay);
+        });
+        Shoot("LabelOverlayConfigPanel", () =>
+        {
+            var overlay = Stub<LabelOverlay>();
+            SetProperty(overlay, "Config", new LabelOverlayConfig(container, "Label"));
+            return new LabelOverlayConfigPanel(container, overlay);
+        });
+        Shoot("LogParseConfigPanel", () =>
+        {
+            var overlay = Stub<LogParseOverlay>();
+            SetProperty(overlay, "Config", new LogParseOverlayConfig("Log Parse"));
+            return new LogParseConfigPanel(overlay);
+        });
         return failed;
+    }
+
+    // A dialog as it opens, at its own size: shown off screen (not in the taskbar) for a moment.
+    static void ShootDialog(string outDir, string name, Form dialog)
+    {
+        dialog.ShowInTaskbar = false;
+        dialog.StartPosition = FormStartPosition.Manual;
+        dialog.Location = new Point(-32000, -32000);
+        dialog.Show();
+        Application.DoEvents();
+        Save(dialog, Path.Combine(outDir, name + ".png"));
+        dialog.Close();
     }
 
     // The control in a hidden form at the given size, each tab of its tab controls drawn on its own.
@@ -106,7 +187,7 @@ static class Program
             CreateHandles(control);
             form.PerformLayout();
             var tabs = All(control).OfType<TabControl>().FirstOrDefault();
-            if (tabs == null)
+            if (tabs == null || tabs.TabCount == 0)
             {
                 Save(control, Path.Combine(outDir, name + ".png"));
                 return;
@@ -164,7 +245,7 @@ static class Program
                 f.SetValue(info, Activator.CreateInstance(f.FieldType));
             return f.GetValue(info);
         }
-        foreach (var name in new[] { "warnings", "plugins", "overlays", "header", "fork", "pluginOptions", "cactbot" })
+        foreach (var name in new[] { "warnings", "plugins", "overlays", "header", "fork", "pluginOptions", "cactbot", "problems" })
             Field(name);
         void Add(string name, object item) => Field(name).GetType().GetMethod("Add").Invoke(Field(name), new[] { item });
         Add("header", "OverlayPlugin 0.19.110.4 (custom) | ACT 3.8.3.290 | FFXIV_ACT_Plugin 3.0.3.3");
@@ -189,6 +270,8 @@ static class Program
         };
         foreach (var u in urls)
             Add("overlays", ValueTuple.Create(u.Item1, u.Item2, u.Item3));
+        Add("problems", ValueTuple.Create("21:03:12", "W", "Raidboss : Alerts: Uncaught TypeError: Cannot read properties of undefined (reading 'name') at <ACT>/Plugins/cbkr/ui/raidboss/raidboss.bundle.js:1:123456", 3));
+        Add("problems", ValueTuple.Create("21:05:40", "E", "WSServer: Failed to start: Address already in use", 1));
         for (int i = 0; i < extra; i++)
             Add("overlays", ValueTuple.Create($"Extra overlay {i + 1}", "CEF 60fps", $"<ACT>/Plugins/some-long-folder-name/ui/overlay-number-{i + 1}/index.html?option=value&other=thing"));
         var text = (string)type.GetMethod("Compose", new[] { typeof(int) }).Invoke(info, new object[] { 2000 });
@@ -212,6 +295,27 @@ static class Program
     }
 
     static T Stub<T>() => (T)FormatterServices.GetUninitializedObject(typeof(T));
+
+    static void SetMember(object target, string name, object value)
+    {
+        for (var t = target.GetType(); t != null; t = t.BaseType)
+        {
+            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+            var f = t.GetField(name, flags) ?? t.GetField($"<{name}>k__BackingField", flags);
+            if (f != null)
+            {
+                f.SetValue(target, value);
+                return;
+            }
+            var p = t.GetProperty(name, flags);
+            if (p != null && p.GetSetMethod(true) != null)
+            {
+                p.SetValue(target, value);
+                return;
+            }
+        }
+        throw new MissingMemberException(target.GetType().Name, name);
+    }
 
     static void SetProperty(object target, string name, object value)
     {

@@ -11,6 +11,8 @@
   <ItemGroup>
     <Reference Include="OverlayPlugin.Core"><HintPath>$(PluginLibs)OverlayPlugin.Core.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="OverlayPlugin.Common"><HintPath>$(PluginLibs)OverlayPlugin.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(PluginLibs)Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Advanced Combat Tracker"><HintPath>$(MSBuildThisFileDirectory)..\..\Thirdparty\ACT\Advanced Combat Tracker.exe</HintPath><Private>false</Private></Reference>
     <Reference Include="HtmlRenderer"><HintPath>$(PluginLibs)HtmlRenderer.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 </Project>
