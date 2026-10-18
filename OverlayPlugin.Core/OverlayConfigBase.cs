@@ -113,10 +113,11 @@ namespace RainbowMage.OverlayPlugin
         }
 
         // Fork: draw this overlay with Edge WebView2 instead of CEF (see
-        // HtmlRenderer.WebView2Browser).  Changing it replaces the overlay's window.
+        // HtmlRenderer.WebView2Browser): the default, for new overlays and ones never set (CEF
+        // when the runtime can't be used).  Changing it replaces the overlay's window.
         public event EventHandler UseWebView2Changed;
 
-        private bool useWebView2;
+        private bool useWebView2 = true;
         public bool UseWebView2
         {
             get

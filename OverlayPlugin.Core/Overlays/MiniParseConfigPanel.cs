@@ -299,7 +299,7 @@ namespace RainbowMage.OverlayPlugin.Overlays
             var cbUseWebView2 = new CheckBox
             {
                 Name = "cbUseWebView2",
-                Text = ko ? "WebView2로 그리기 (실험)" : "Draw with WebView2 (experimental)",
+                Text = ko ? "WebView2로 그리기 (기본)" : "Draw with WebView2 (default)",
                 Location = new Point(nudMaxFrameRate.Left, label.Top - 2),
                 AutoSize = true,
                 UseVisualStyleBackColor = true,

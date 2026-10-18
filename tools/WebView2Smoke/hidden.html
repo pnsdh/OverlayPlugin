@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<body style="background: rgba(0, 0, 0, 0.5); color: white">timers while hidden</body>
+<script>
+  // A 50 ms timer, as cactbot's: how often it ran each second and how late it was at most.
+  let last = performance.now();
+  let late = 0;
+  let runs = 0;
+  setInterval(() => {
+    const now = performance.now();
+    late = Math.max(late, now - last - 50);
+    last = now;
+    runs++;
+  }, 50);
+  let second = performance.now();
+  setInterval(() => {
+    const now = performance.now();
+    console.log(`runs=${runs} in ${Math.round(now - second)} ms, latest late=${Math.round(late)} ms, ${document.visibilityState}`);
+    second = now;
+    late = 0;
+    runs = 0;
+  }, 1000);
+</script>

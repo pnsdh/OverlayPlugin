@@ -270,9 +270,17 @@ namespace RainbowMage.HtmlRenderer
         // that has made a composition controller (an overlay's) refuses to make a windowed one
         // (0x8007139F, ERROR_INVALID_STATE), and so does another one on its user data folder:
         // panels have an environment and a folder of their own.
+        //
+        // A hidden overlay (the game not the active window, a cutscene) stops drawing but keeps its
+        // timers at their pace: Edge would run them once a second (once a minute after five
+        // minutes), so cactbot's delayed alerts and TTS would come up to a second late when the
+        // player alt-tabs or a cutscene plays in a fight (measured: 50 ms timers ran once a second,
+        // 0.95 s late; with these switches 20 times a second, 13 ms late, while hidden).
         private static Task<CoreWebView2Environment> GetEnvironment(bool panels = false)
         {
-            var options = new CoreWebView2EnvironmentOptions("--allow-file-access-from-files --autoplay-policy=no-user-gesture-required");
+            var options = new CoreWebView2EnvironmentOptions("--allow-file-access-from-files --autoplay-policy=no-user-gesture-required" +
+                " --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows" +
+                " --disable-features=IntensiveWakeUpThrottling");
             if (panels)
             {
                 if (panelEnvironment == null)
