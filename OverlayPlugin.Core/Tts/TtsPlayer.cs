@@ -107,7 +107,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                                 endpoint = null;
                             }
                         }
-                        // A device that is gone: the default, rather than silence.
+                        // A device that is gone: the default, rather than silence (as the default,
+                        // so it follows Windows' default and the chosen one is tried again next time).
+                        bool fallback = endpoint == null;
                         endpoint = endpoint ?? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
                         var mix = endpoint.AudioClient.MixFormat;
                         var newMixer = new MixingSampleProvider(WaveFormat.CreateIeeeFloatWaveFormat(mix.SampleRate, Math.Min(2, Math.Max(1, mix.Channels))))
@@ -116,12 +118,21 @@ namespace RainbowMage.OverlayPlugin.Tts
                             ReadFully = true,
                         };
                         var newOutput = new WasapiOut(endpoint, AudioClientShareMode.Shared, true, LatencyMs);
-                        newOutput.PlaybackStopped += OnStopped;
-                        newOutput.Init(newMixer);
-                        newOutput.Play();
+                        try
+                        {
+                            newOutput.PlaybackStopped += OnStopped;
+                            newOutput.Init(newMixer);
+                            newOutput.Play();
+                        }
+                        catch
+                        {
+                            newOutput.PlaybackStopped -= OnStopped;
+                            newOutput.Dispose();
+                            throw;
+                        }
                         output = newOutput;
                         mixer = newMixer;
-                        deviceId = device ?? "";
+                        deviceId = fallback ? "" : device ?? "";
                     }
                 }
                 catch (Exception e)
@@ -214,9 +225,13 @@ namespace RainbowMage.OverlayPlugin.Tts
             mixer = null;
             if (m != null)
             {
-                foreach (var playback in m.MixerInputs.OfType<TtsPlayback>().ToList())
-                    playback.End();
+                List<TtsPlayback> ended;
+                // The mixer's own list, also changed by the playback thread under it.
+                lock (m.MixerInputs)
+                    ended = m.MixerInputs.OfType<TtsPlayback>().ToList();
                 m.RemoveAllMixerInputs();
+                foreach (var playback in ended)
+                    playback.End();
             }
             if (o != null)
             {

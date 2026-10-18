@@ -34,6 +34,18 @@ namespace RainbowMage.OverlayPlugin.Tts
             }
         }
 
+        public bool Has(string key)
+        {
+            try
+            {
+                return File.Exists(PathOf(key));
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
         public TtsClip Get(string key)
         {
             var path = PathOf(key);

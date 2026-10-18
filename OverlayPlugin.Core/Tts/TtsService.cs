@@ -149,6 +149,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         // found any more (its key differs) and ages out of the cache.
         public void ConfigChanged()
         {
+            if (stopping)
+                return;
             lock (sync)
             {
                 processor = null;
@@ -164,11 +166,19 @@ namespace RainbowMage.OverlayPlugin.Tts
         // unloaded when another voice is chosen (its memory back).
         public void LoadOrUnload()
         {
+            if (stopping)
+            {
+                supertonic.Unload();
+                return;
+            }
             if (config.Enabled && Provider == supertonic)
                 supertonic.Warm(Settings);
             else
                 supertonic.Unload();
         }
+
+        // Fetching ahead stopped (its option turned off).
+        public void CancelPrepare() => preparing?.Cancel();
 
         public void ClearCaches()
         {
@@ -273,7 +283,14 @@ namespace RainbowMage.OverlayPlugin.Tts
                 if (next == null)
                 {
                     // Meanwhile, the one after is made ready.
-                    MakeAhead();
+                    try
+                    {
+                        MakeAhead();
+                    }
+                    catch (Exception e)
+                    {
+                        LogError(e.Message);
+                    }
                     wake.WaitOne(250);
                     continue;
                 }
@@ -326,7 +343,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                 if (Ms(request.Asked, made) > config.MaxWaitMs || stopping || request.Cut)
                     return;
                 playing = request;
-                playingSince = made;
+                // Until it plays (opening a slow device): a long margin, set again once started.
+                playingSince = made + Stopwatch.Frequency * 10;
                 playingSeconds = clip.Samples.Length / (double)Math.Max(1, clip.SampleRate);
             }
             player.Prepare(config.OutputDevice);
@@ -345,6 +363,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             long now = Stopwatch.GetTimestamp();
             lock (sync)
             {
+                if (playing == request)
+                    playingSince = now;
                 if (started == null)
                 {
                     playing = null;
@@ -379,9 +399,22 @@ namespace RainbowMage.OverlayPlugin.Tts
             // it); found in the cache, or joined while still fetching, when its turn comes.
             if (Provider.IsSlow)
             {
-                var plan = Plan(ahead);
-                if (plan != null && FromMemory(plan.Key) == null)
-                    Fetch(plan);
+                try
+                {
+                    var plan = Plan(ahead);
+                    if (plan != null && FromMemory(plan.Key) == null)
+                    {
+                        var saved = disk.Get(plan.Key);
+                        if (saved != null)
+                            Keep(plan.Key, saved, false);
+                        else
+                            Fetch(plan);
+                    }
+                }
+                catch (Exception e)
+                {
+                    LogError($"could not say \"{ahead.Text}\": {e.Message}");
+                }
                 return;
             }
             try
@@ -467,7 +500,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             var processor = Processor(voice?.Lang ?? lang);
             var todo = texts.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => processor.Process(t)).Where(t => t != "")
                 .Distinct().Take(PrepareMax).Select(spoken => (spoken, key: KeyFor(provider, s, voice, voice?.Lang ?? lang, spoken)))
-                .Where(x => FromMemory(x.key) == null && disk.Get(x.key) == null).ToList();
+                .Where(x => FromMemory(x.key) == null && !disk.Has(x.key)).ToList();
             int done = 0, failures = 0;
             PrepareProgress = (0, todo.Count);
             Prepared?.Invoke(0, todo.Count);
@@ -553,6 +586,8 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         private TtsClip WindowsInstead(Request request, string lang)
         {
+            if (stopping)
+                return null;
             request.FellBack = true;
             var voice = VoiceFor(windows, lang);
             string key = $"{windows.Id}||{voice?.Id}|{config.Rate}|{request.Spoken}";

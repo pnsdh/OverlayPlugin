@@ -98,7 +98,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             {
                 var path = Path.Combine(Folder, f.Path);
                 // Kept from before (a download stopped midway): only if it is the right file.
-                if (File.Exists(path) && new FileInfo(path).Length == f.Size && await Task.Run(() => Sha256(path), cancel) == f.Sha)
+                if (File.Exists(path) && new FileInfo(path).Length == f.Size && await Task.Run(() => Sha256(path), cancel).ConfigureAwait(false) == f.Sha)
                 {
                     Add(f.Size);
                     continue;
@@ -109,7 +109,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                 {
                     try
                     {
-                        await Fetch(b + f.Path, path, f.Size, f.Sha, Add, cancel);
+                        await Fetch(b + f.Path, path, f.Size, f.Sha, Add, cancel).ConfigureAwait(false);
                         last = null;
                         break;
                     }
@@ -125,7 +125,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             if (!File.Exists(RuntimePath))
             {
                 var zip = Path.Combine(Folder, "onnxruntime.zip");
-                await Fetch(RuntimeUrl, zip, RuntimeZipSize, RuntimeZipSha, Add, cancel);
+                await Fetch(RuntimeUrl, zip, RuntimeZipSize, RuntimeZipSha, Add, cancel).ConfigureAwait(false);
                 Directory.CreateDirectory(Path.GetDirectoryName(RuntimePath));
                 using (var archive = ZipFile.OpenRead(zip))
                 {
@@ -155,7 +155,21 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             long counted = 0;
             try
             {
-                using (var response = await TtsHttp.LongClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancel))
+                HttpResponseMessage answered;
+                // A server that takes the connection but never answers: given up after 30 seconds.
+                using (var headers = CancellationTokenSource.CreateLinkedTokenSource(cancel))
+                {
+                    headers.CancelAfter(TimeSpan.FromSeconds(30));
+                    try
+                    {
+                        answered = await TtsHttp.LongClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, headers.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+                    {
+                        throw new IOException("no answer for 30 seconds");
+                    }
+                }
+                using (var response = answered)
                 // A read stuck on a dead connection does not see the token: the response is closed
                 // under it (on Stop, or when nothing comes for 30 seconds).
                 using (var stall = new CancellationTokenSource())
@@ -163,7 +177,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                 using (stall.Token.Register(() => response.Dispose()))
                 {
                     response.EnsureSuccessStatusCode();
-                    using (var input = await response.Content.ReadAsStreamAsync())
+                    using (var input = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
                     using (var output = File.Create(temp))
                     using (var hash = SHA256.Create())
                     {
@@ -174,7 +188,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                             stall.CancelAfter(TimeSpan.FromSeconds(30));
                             try
                             {
-                                read = await input.ReadAsync(buffer, 0, buffer.Length, cancel);
+                                read = await input.ReadAsync(buffer, 0, buffer.Length, cancel).ConfigureAwait(false);
                             }
                             catch (Exception) when (cancel.IsCancellationRequested)
                             {
@@ -186,7 +200,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                             }
                             if (read <= 0)
                                 break;
-                            await output.WriteAsync(buffer, 0, read, cancel);
+                            await output.WriteAsync(buffer, 0, read, cancel).ConfigureAwait(false);
                             hash.TransformBlock(buffer, 0, read, null, 0);
                             counted += read;
                             progress(read);

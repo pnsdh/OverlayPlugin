@@ -107,9 +107,9 @@ namespace RainbowMage.OverlayPlugin.Tts
             network.Controls.Add(Hint(T("An alert is made (and, with a paid service, paid for) once; after that it plays at once, also after restarting ACT.",
                 "한 번 만든 알림은 다시 만들지 않고(유료 서비스는 요금도 한 번) 바로 재생합니다. ACT를 다시 시작해도 남습니다.")));
             network.Controls.Add(Check(T("On entering a zone, make its alerts ahead (so the first time is quick too; a paid service charges each once)",
-                "지역에 들어가면 그 지역 알림을 미리 만들어 두기 (처음에도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => config.PrepareAhead = v));
+                "지역에 들어가면 그 지역 알림을 미리 만들어 두기 (처음에도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => { config.PrepareAhead = v; if (!v) service.CancelPrepare(); }));
             network.Controls.Add(Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
-                "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => config.PrepareAheadLocal = v));
+                "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); }));
             prepared = Hint("");
             network.Controls.Add(prepared);
             service.Prepared += OnPrepared;
@@ -260,9 +260,11 @@ namespace RainbowMage.OverlayPlugin.Tts
                     : busy ? status.Text
                     : T($"Not downloaded. About {Mb(model.DownloadSize)} MB, only when you ask for it.",
                         $"아직 내려받지 않았습니다. 약 {Mb(model.DownloadSize)}MB이며 누를 때만 받습니다.");
+                if (model.Ready && model.LoadError != null && !busy)
+                    status.Text = model.LoadError;
                 download.Visible = !model.Ready && !busy;
                 cancel.Visible = busy;
-                delete.Visible = model.Ready && !busy;
+                delete.Visible = !busy && (model.Ready || model.SizeOnDisk() > 0);
             }
             download = Button(T("Download", "내려받기"), async () =>
             {
@@ -334,7 +336,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 if (loading)
                     return;
-                if (!config.ProviderSettings.TryGetValue(provider.Id, out var dict))
+                if (!config.ProviderSettings.TryGetValue(provider.Id, out var dict) || dict == null)
                     config.ProviderSettings[provider.Id] = dict = new Dictionary<string, string>();
                 dict[field.Key] = field.Kind == TtsFieldKind.Secret ? TtsSecrets.Protect(v) : v;
                 Changed();
@@ -521,6 +523,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             foreach (DataGridViewColumn column in grid.Columns)
                 column.SortMode = DataGridViewColumnSortMode.NotSortable;
             FillRules(grid);
+            grid.DefaultValuesNeeded += (o, e) => e.Row.Cells["Enabled"].Value = true;
             grid.CellValueChanged += (o, e) => SaveRules();
             grid.UserDeletedRow += (o, e) => SaveRules();
             grid.CurrentCellDirtyStateChanged += (o, e) =>
@@ -596,6 +599,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 service.Spoken -= OnSpoken;
                 service.Prepared -= OnPrepared;
+                downloading?.Cancel();
                 ownerTimer.Dispose();
             }
             base.Dispose(disposing);

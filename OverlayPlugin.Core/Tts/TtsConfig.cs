@@ -79,6 +79,11 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             if (ProviderSettings == null)
                 ProviderSettings = new Dictionary<string, Dictionary<string, string>>();
+            foreach (var key in new List<string>(ProviderSettings.Keys))
+            {
+                if (ProviderSettings[key] == null)
+                    ProviderSettings[key] = new Dictionary<string, string>();
+            }
             if (Replacements == null)
                 Replacements = new List<TtsReplacement>();
             Replacements.RemoveAll(r => r == null);

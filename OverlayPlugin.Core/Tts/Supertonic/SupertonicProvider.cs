@@ -101,7 +101,13 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             {
                 lock (sync)
                 {
-                    if (current != null && current.Threads == threads && generation == startedAt)
+                    // What changed while it waited for the load before it.
+                    if (!wanted)
+                        throw new InvalidOperationException(Ko ? "Supertonic을 고르지 않았거나 TTS가 꺼져 있습니다" : "Supertonic is not chosen or TTS is off");
+                    if (loadError != null)
+                        throw new InvalidOperationException(loadError);
+                    startedAt = generation;
+                    if (current != null && current.Threads == threads)
                     {
                         current.Users++;
                         return current;
@@ -185,6 +191,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                 wanted = false;
                 generation++;
                 Retire(current);
+                loadError = null;
             }
         }
 
@@ -193,6 +200,15 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
         public long SizeOnDisk() => SupertonicModel.SizeOnDisk();
         public string LicenseUrl => SupertonicModel.LicenseUrl;
         public string Folder => SupertonicModel.Folder;
+
+        public string LoadError
+        {
+            get
+            {
+                lock (sync)
+                    return loadError;
+            }
+        }
 
         public async Task Download(IProgress<(long Done, long Total)> progress, CancellationToken cancel)
         {

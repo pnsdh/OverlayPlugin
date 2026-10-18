@@ -57,6 +57,8 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         private TtsClip SynthesizeLocked(string text, TtsVoice voice, int rate)
         {
+            if (disposed)
+                return null;
             if (synth == null)
                 synth = new SpeechSynthesizer();
             if (voice != null && voice.Id != selected)
@@ -105,10 +107,16 @@ namespace RainbowMage.OverlayPlugin.Tts
             return trimmed;
         }
 
+        private bool disposed;
+
         public void Dispose()
         {
-            synth?.Dispose();
-            synth = null;
+            lock (sync)
+            {
+                disposed = true;
+                synth?.Dispose();
+                synth = null;
+            }
         }
     }
 }

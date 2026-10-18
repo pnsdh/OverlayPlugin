@@ -37,6 +37,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         long SizeOnDisk();
         string LicenseUrl { get; }
         string Folder { get; }
+        // Why it could not be loaded, if it could not (until downloaded or chosen again).
+        string LoadError { get; }
         System.Threading.Tasks.Task Download(System.IProgress<(long Done, long Total)> progress, CancellationToken cancel);
         void Delete();
     }
