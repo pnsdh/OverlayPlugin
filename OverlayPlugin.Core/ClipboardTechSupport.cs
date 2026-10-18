@@ -49,6 +49,8 @@ namespace RainbowMage.OverlayPlugin
         private readonly List<string> fork = new List<string>();
         private readonly List<(string Text, bool Checked, bool Default)> pluginOptions = new List<(string, bool, bool)>();
         private readonly List<string> cactbot = new List<string>();
+        private readonly List<(string Time, string Level, string Message, int Count)> problems = new List<(string, string, string, int)>();
+        private string playerName;
 
         private const ulong WS_POPUP = 0x80000000L;
         private const ulong WS_CAPTION = 0x00C00000L;
@@ -136,6 +138,13 @@ namespace RainbowMage.OverlayPlugin
 
             var repository = container.Resolve<FFXIVRepository>();
             var pluginConfig = container.Resolve<IPluginConfig>();
+            try
+            {
+                // Hidden from the log lines below (overlays' messages may name the player).
+                playerName = repository.GetPlayerName();
+            }
+            catch { }
+            CollectProblems(container);
             header.Add($"OverlayPlugin {repository.GetOverlayPluginVersion()} (custom) | ACT {typeof(FormActMain).Assembly.GetName().Version}" +
                 (repository.IsFFXIVPluginPresent() ? $" | FFXIV_ACT_Plugin {repository.GetPluginVersion()}" : ""));
 
@@ -271,6 +280,30 @@ namespace RainbowMage.OverlayPlugin
                         cactbot.Add("skin " + skin);
                 }
                 catch { }
+            }
+        }
+
+        // The last warnings and errors in OverlayPlugin's log (overlays' console errors included),
+        // newest last, a repeated message once with its count; first line only, paths and the
+        // player's name hidden.
+        private void CollectProblems(TinyIoCContainer container)
+        {
+            if (!(container.Resolve<ILogger>() is Logger logger))
+                return;
+            foreach (var entry in logger.RecentProblems())
+            {
+                var message = Censor((entry.Message ?? "").Split('\n')[0].Trim());
+                if (!string.IsNullOrEmpty(playerName))
+                    message = message.Replace(playerName, "<PLAYER>");
+                var level = entry.Level == LogLevel.Error ? "E" : "W";
+                int same = problems.FindIndex(p => p.Message == message && p.Level == level);
+                int count = 1;
+                if (same >= 0)
+                {
+                    count += problems[same].Count;
+                    problems.RemoveAt(same);
+                }
+                problems.Add((entry.Time.ToString("HH:mm:ss"), level, message, count));
             }
         }
 
@@ -454,8 +487,8 @@ namespace RainbowMage.OverlayPlugin
         }
 
         // The text in a code block, as short as needed to fit a Discord message: first full, then
-        // without plugin folders, with overlay URLs cut to their page, with only unusual plugin
-        // options, and as a last resort cut at the end.
+        // without plugin folders, with overlay URLs cut to their page and fewer, shorter log lines,
+        // with only unusual plugin options, and as a last resort cut at the end.
         public string Compose(int limit = DiscordLimit)
         {
             for (int level = 0; level <= 3; level++)
@@ -484,6 +517,18 @@ namespace RainbowMage.OverlayPlugin
                 lines.Add("FFXIV plugin: " + string.Join(", ", options));
             if (cactbot.Count > 0)
                 lines.Add("cactbot: " + string.Join(", ", cactbot));
+            // Before the lists, which are cut first.
+            if (problems.Count > 0)
+            {
+                int count = level >= 2 ? 3 : 6;
+                int width = level >= 2 ? 100 : 160;
+                lines.Add($"Recent log problems ({problems.Sum(p => p.Count)}):");
+                foreach (var p in problems.Skip(Math.Max(0, problems.Count - count)))
+                {
+                    var message = p.Message.Length > width ? p.Message.Substring(0, width - 3) + "..." : p.Message;
+                    lines.Add($" {p.Time} {p.Level} {message}{(p.Count > 1 ? $" (x{p.Count})" : "")}");
+                }
+            }
             lines.Add("Plugins:");
             foreach (var p in plugins)
                 lines.Add($" {p.Name} {p.Version}{(p.Enabled ? "" : " (off)")}{(level >= 1 ? "" : $" [{p.Folder}]")}");

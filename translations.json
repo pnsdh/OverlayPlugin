@@ -459,7 +459,7 @@
             "en": "Update DPS during log import",
             "fr-FR": "Mettre à jour le DPS pendant l'import du log",
             "ja-JP": "ログのインポート中にDPSを更新する",
-            "ko-KR": "로그 가져 오기(import) 중에 DPS를 업데이트",
+            "ko-KR": "로그 가져오기 중에도 DPS 갱신",
             "zh-CN": "在导入日志时刷新 DPS 数据"
         },
         "label5.Text": {

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 
 namespace RainbowMage.OverlayPlugin
@@ -13,6 +14,18 @@ namespace RainbowMage.OverlayPlugin
         /// </summary>
         public BindingList<LogEntry> Logs { get; private set; }
         private Action<LogEntry> listener = null;
+
+        // Fork: the last warnings and errors, kept for the tech support info.
+        private const int ProblemsKept = 20;
+        private readonly Queue<LogEntry> problems = new Queue<LogEntry>();
+
+        public LogEntry[] RecentProblems()
+        {
+            lock (problems)
+            {
+                return problems.ToArray();
+            }
+        }
 
         public Logger()
         {
@@ -37,6 +50,15 @@ namespace RainbowMage.OverlayPlugin
 #endif
 
             var entry = new LogEntry(level, DateTime.Now, message);
+            if (level >= LogLevel.Warning)
+            {
+                lock (problems)
+                {
+                    problems.Enqueue(entry);
+                    if (problems.Count > ProblemsKept)
+                        problems.Dequeue();
+                }
+            }
 
             if (listener != null)
             {

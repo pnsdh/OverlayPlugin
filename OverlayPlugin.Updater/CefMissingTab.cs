@@ -26,9 +26,14 @@ namespace RainbowMage.OverlayPlugin.Updater
             _pluginLoader = pluginLoader;
             lnkManual.Text = CefInstaller.GetUrl();
 
+            // Fork: the installer logs from its download thread; the box is written on the UI thread.
             container.Resolve<ILogger>().RegisterListener((entry) =>
             {
-                logBox.AppendText($"[{entry.Time}] {entry.Level}: {entry.Message}" + Environment.NewLine);
+                var line = $"[{entry.Time}] {entry.Level}: {entry.Message}" + Environment.NewLine;
+                if (!logBox.IsHandleCreated || !logBox.InvokeRequired)
+                    logBox.AppendText(line);
+                else
+                    logBox.BeginInvoke((Action)(() => logBox.AppendText(line)));
             });
         }
 

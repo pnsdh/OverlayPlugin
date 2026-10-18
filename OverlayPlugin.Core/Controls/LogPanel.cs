@@ -16,9 +16,15 @@ namespace RainbowMage.OverlayPlugin.Controls
         {
             InitializeComponent();
 
+            // Fork: entries come from any thread (e.g. overlays' console); the box is written on
+            // the UI thread, posted so that a thread holding a lock never waits for it.
             container.Resolve<ILogger>().RegisterListener((entry) =>
             {
-                logBox.AppendText($"[{entry.Time}] {entry.Level}: {entry.Message}" + Environment.NewLine);
+                var line = $"[{entry.Time}] {entry.Level}: {entry.Message}" + Environment.NewLine;
+                if (!logBox.IsHandleCreated || !logBox.InvokeRequired)
+                    logBox.AppendText(line);
+                else
+                    logBox.BeginInvoke((Action)(() => logBox.AppendText(line)));
             });
         }
     }
