@@ -29,6 +29,9 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly Label cacheSize;
         private readonly Label prepared;
         private readonly FlowLayoutPanel usagePanel;
+        private readonly Control slowSection;
+        private readonly Control slowHeader;
+        private readonly CheckBox localPrepare;
         private Action refreshUsage;
         private bool loading;
 
@@ -85,6 +88,9 @@ namespace RainbowMage.OverlayPlugin.Tts
 
             // Voices over the network.
             var network = Section(root, T("Slower voices (network, Supertonic)", "느린 음성 (네트워크, Supertonic)"));
+            // Shown only for such a voice (see ShowProviderFields).
+            slowSection = network;
+            slowHeader = root.Controls[root.Controls.Count - 2];
             var networkGrid = Grid(network);
             Row(networkGrid, T("Windows' voice instead if not ready within", "이 시간 안에 준비 안 되면 Windows 음성으로 대신 읽기"), Seconds(config.FallbackMs, 0.1m, 5, v => config.FallbackMs = v, 0.1m));
             var cacheRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
@@ -110,8 +116,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                 "한 번 만든 알림은 다시 만들지 않고(유료 서비스는 요금도 한 번) 바로 재생합니다. ACT를 다시 시작해도 남습니다.")));
             network.Controls.Add(Check(T("On entering a zone, make its alerts ahead (so the first time is quick too; a paid service charges each once)",
                 "지역에 들어가면 그 지역 알림을 미리 만들어 두기 (처음에도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => { config.PrepareAhead = v; if (!v) service.CancelPrepare(); }));
-            network.Controls.Add(Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
-                "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); }));
+            localPrepare = Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
+                "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); });
+            network.Controls.Add(localPrepare);
             prepared = Hint("");
             network.Controls.Add(prepared);
             // A paid voice's usage (made again with the provider's fields).
@@ -233,6 +240,13 @@ namespace RainbowMage.OverlayPlugin.Tts
                     "본인 키를 쓰며 요금도 본인 계정에 나옵니다. 키는 이 Windows 사용자만 풀 수 있게 암호화해 저장합니다.")));
             }
             providerFields.ResumeLayout();
+            // Fallback, disk, fetching ahead and usage are only for a slow voice (network,
+            // Supertonic); the Supertonic option only for it.
+            if (slowSection != null)
+            {
+                slowSection.Visible = slowHeader.Visible = provider.IsSlow;
+                localPrepare.Visible = provider is ITtsDownloadable;
+            }
             ShowUsage();
             loading = wasLoading;
         }
