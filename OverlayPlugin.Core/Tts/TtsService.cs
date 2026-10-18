@@ -50,6 +50,12 @@ namespace RainbowMage.OverlayPlugin.Tts
         // For the settings' preview: how the last speech went.
         public event Action<TtsResult> Spoken;
 
+        // Alerts fetched ahead (see Prepare): done of total, for the settings.
+        public event Action<int, int> Prepared;
+        public (int Done, int Total) PrepareProgress { get; private set; }
+        private CancellationTokenSource preparing;
+        private const int PrepareMax = 500;
+
         public TtsService(TinyIoCContainer container, TtsConfig config)
         {
             logger = container.Resolve<ILogger>();
@@ -309,6 +315,64 @@ namespace RainbowMage.OverlayPlugin.Tts
             }
         }
 
+        // What identifies a text's speech with the current settings (memory and disk caches).
+        private string KeyFor(ITtsProvider provider, TtsSettings s, TtsVoice voice, string spoken) =>
+            $"{provider.Id}|{s.Fingerprint(provider)}|{voice?.Id}|{config.Rate}|{spoken}";
+
+        // A zone's alerts (from an overlay, on entering it) fetched ahead from a network voice and
+        // kept on disk, two at a time, so they play at once the first time too.  A new list stops
+        // the last; repeated failures (no network, a bad key) stop it too.
+        public void Prepare(IEnumerable<string> texts, string lang)
+        {
+            preparing?.Cancel();
+            var provider = Provider;
+            if (!config.PrepareAhead || !provider.IsRemote || stopping)
+                return;
+            var cancel = (preparing = new CancellationTokenSource()).Token;
+            var s = Settings;
+            lang = string.IsNullOrEmpty(lang) ? CultureInfo.CurrentUICulture.TwoLetterISOLanguageName : lang;
+            var voice = VoiceFor(provider, lang);
+            var processor = Processor(voice?.Lang ?? lang);
+            var todo = texts.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => processor.Process(t)).Where(t => t != "")
+                .Distinct().Take(PrepareMax).Select(spoken => (spoken, key: KeyFor(provider, s, voice, spoken)))
+                .Where(x => FromMemory(x.key) == null && disk.Get(x.key) == null).ToList();
+            int done = 0, failures = 0;
+            PrepareProgress = (0, todo.Count);
+            Prepared?.Invoke(0, todo.Count);
+            if (todo.Count == 0)
+                return;
+            Task.Run(() =>
+            {
+                try
+                {
+                    Parallel.ForEach(todo, new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = cancel }, (x, state) =>
+                    {
+                        try
+                        {
+                            var clip = provider.Synthesize(new TtsSynthesis { Text = x.spoken, Voice = voice, Rate = config.Rate, Lang = voice?.Lang ?? lang, Settings = s }, cancel);
+                            if (clip != null)
+                                disk.Put(x.key, clip);
+                            Interlocked.Exchange(ref failures, 0);
+                        }
+                        catch (Exception e) when (!(e is OperationCanceledException))
+                        {
+                            if (Interlocked.Increment(ref failures) >= 3)
+                            {
+                                LogError($"{provider.Name}: fetching ahead stopped: {e.GetBaseException().Message}");
+                                state.Stop();
+                            }
+                        }
+                        int n = Interlocked.Increment(ref done);
+                        PrepareProgress = (n, todo.Count);
+                        Prepared?.Invoke(n, todo.Count);
+                    });
+                }
+                catch (OperationCanceledException)
+                {
+                }
+            });
+        }
+
         private TtsClip Make(Request request)
         {
             var provider = Provider;
@@ -318,7 +382,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             request.Spoken = Processor(lang).Process(request.Text);
             if (request.Spoken == "")
                 return null;
-            string key = $"{provider.Id}|{s.Fingerprint(provider)}|{voice?.Id}|{config.Rate}|{request.Spoken}";
+            string key = KeyFor(provider, s, voice, request.Spoken);
             var kept = FromMemory(key);
             if (kept != null)
             {
@@ -474,6 +538,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (stopping)
                 return;
             stopping = true;
+            preparing?.Cancel();
             wake.Set();
             worker.Join(2000);
             player.Dispose();

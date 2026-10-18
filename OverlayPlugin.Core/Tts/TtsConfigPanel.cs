@@ -26,6 +26,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly Timer ownerTimer;
         private readonly FlowLayoutPanel providerFields;
         private readonly Label cacheSize;
+        private readonly Label prepared;
         private bool loading;
 
         public TtsConfigPanel(TinyIoCContainer container)
@@ -104,6 +105,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             Row(networkGrid, T("Keep fetched speech on disk", "받은 음성을 디스크에 보관"), cacheRow);
             network.Controls.Add(Hint(T("An alert is fetched (and paid for) once; after that it plays at once, also after restarting ACT.",
                 "한 번 받은 알림은 다시 받지 않고(요금도 한 번) 바로 재생합니다. ACT를 다시 시작해도 남습니다.")));
+            network.Controls.Add(Check(T("On entering a zone, fetch its alerts ahead (so the first time is quick too; each costs once)",
+                "지역에 들어가면 그 지역 알림을 미리 받아 두기 (처음에도 바로 읽음, 요금은 문장마다 한 번)"), config.PrepareAhead, v => config.PrepareAhead = v));
+            prepared = Hint("");
+            network.Controls.Add(prepared);
+            service.Prepared += OnPrepared;
+            OnPrepared(service.PrepareProgress.Done, service.PrepareProgress.Total);
 
             // How loud.
             var volume = Section(root, T("Volume", "볼륨"));
@@ -366,6 +373,22 @@ namespace RainbowMage.OverlayPlugin.Tts
             }));
         }
 
+        private void OnPrepared(int done, int total)
+        {
+            if (IsDisposed)
+                return;
+            void Show()
+            {
+                if (IsDisposed)
+                    return;
+                prepared.Text = total == 0 ? "" : T($"Fetched ahead for this zone: {done} of {total}", $"이 지역 알림 미리 받기: {done}/{total}");
+            }
+            if (IsHandleCreated && InvokeRequired)
+                BeginInvoke((Action)Show);
+            else if (!InvokeRequired)
+                Show();
+        }
+
         private DataGridView RulesGrid()
         {
             var grid = new DataGridView
@@ -459,6 +482,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (disposing)
             {
                 service.Spoken -= OnSpoken;
+                service.Prepared -= OnPrepared;
                 ownerTimer.Dispose();
             }
             base.Dispose(disposing);

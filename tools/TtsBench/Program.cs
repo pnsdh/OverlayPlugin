@@ -162,6 +162,12 @@ static class Program
         }
         void Show(string what, TtsResult r) => Console.WriteLine($"  {what,-34} made {r?.MadeMs,6:0} ms  {(r?.FromCache == true ? "kept " : "")}{(r?.FellBack == true ? "WINDOWS: " + (r.Error ?? "slow") : "network")}");
         Thread.Sleep(1500);
+        // A zone's alerts fetched ahead: the first time is from disk too.
+        int beforePrepare = requests;
+        tts.Prepare(new[] { "미리 받은 문장 하나", "미리 받은 문장 둘", "미리 받은 문장 하나" }, "ko");
+        Thread.Sleep(1200);
+        Console.WriteLine($"  fetched ahead: {tts.PrepareProgress.Done}/{tts.PrepareProgress.Total} ({requests - beforePrepare} requests)");
+        Show("an alert fetched ahead", Say("미리 받은 문장 둘"));
         Show("quick answer (150 ms)", Say("빠른 응답"));
         Show("slow answer (1500 ms > 800)", Say("느림 응답"));
         Thread.Sleep(1200);

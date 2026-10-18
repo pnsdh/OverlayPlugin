@@ -58,6 +58,11 @@ namespace RainbowMage.OverlayPlugin.EventSources
 
             RegisterEventHandler("say", (msg) =>
             {
+                // Fork: what this plugin's TTS takes besides text (asked once by cactbot: other
+                // OverlayPlugins answer nothing, as the text is missing).
+                if (msg["query"]?.ToString() == "capabilities")
+                    return OwnTts(out _) ? new JObject { ["engine"] = "overlayplugin", ["prepare"] = true } : null;
+
                 var text = msg["text"]?.ToString();
                 if (text == null)
                     return null;
@@ -65,14 +70,21 @@ namespace RainbowMage.OverlayPlugin.EventSources
                 // Fork: read by the plugin's own TTS, with how important it is (severity: info,
                 // alert, alarm) and its language (lang), unless that is off or another plugin
                 // speaks for ACT and the user prefers it (see ActTtsBridge).
-                if (container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.TtsService tts) && tts.Config.Enabled &&
-                    !(container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.ActTtsBridge bridge) && bridge.DeferToOther))
+                if (OwnTts(out var tts))
                 {
                     tts.Speak(text, Tts.TtsSeverityParser.Parse(msg["severity"]?.ToString()), msg["source"]?.ToString() ?? "overlay", msg["lang"]?.ToString());
                     return null;
                 }
 
                 ActGlobals.oFormActMain.TTS(text);
+                return null;
+            });
+
+            // Fork: a zone's alerts, fetched ahead by a network voice (see TtsService.Prepare).
+            RegisterEventHandler("ttsPrepare", (msg) =>
+            {
+                if (OwnTts(out var tts) && msg["texts"] is JArray texts)
+                    tts.Prepare(texts.Select(t => t.ToString()).ToList(), msg["lang"]?.ToString());
                 return null;
             });
 
@@ -206,6 +218,14 @@ namespace RainbowMage.OverlayPlugin.EventSources
         public override void SaveConfig(IPluginConfig config)
         {
 
+        }
+
+        // Fork: the plugin's own TTS speaks for overlays: it started, is on, and no other plugin
+        // speaks for ACT that the user prefers (see ActTtsBridge).
+        private bool OwnTts(out Tts.TtsService tts)
+        {
+            return container.TryResolve(ResolveOptions.FailUnregisteredOnly, out tts) && tts.Config.Enabled &&
+                !(container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.ActTtsBridge bridge) && bridge.DeferToOther);
         }
 
         public override void Start()

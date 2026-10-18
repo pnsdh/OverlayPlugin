@@ -41,6 +41,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         // is kept for next time).
         public int FallbackMs { get; set; } = 800;
 
+        // On entering a zone, its alerts (as an overlay lists them) fetched ahead from a network
+        // voice, so even the first time an alert plays at once.
+        public bool PrepareAhead { get; set; } = true;
+
         // Speech from the network kept on disk (megabytes), so an alert is fetched once.
         public int DiskCacheMB { get; set; } = 300;
 
