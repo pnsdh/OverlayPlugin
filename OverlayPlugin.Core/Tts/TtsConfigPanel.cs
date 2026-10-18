@@ -24,6 +24,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly TextBox previewText;
         private readonly DataGridView rules;
         private readonly Timer ownerTimer;
+        private readonly FlowLayoutPanel providerFields;
+        private readonly Label cacheSize;
         private bool loading;
 
         public TtsConfigPanel(TinyIoCContainer container)
@@ -60,15 +62,48 @@ namespace RainbowMage.OverlayPlugin.Tts
             // The voice.
             var voice = Section(root, T("Voice", "음성"));
             var voiceGrid = Grid(voice);
-            var providerBox = Combo(service.Providers.Select(p => new Item(p.Name, p.Id)), config.Provider, v => { config.Provider = (string)v; Changed(); });
+            var providerBox = Combo(service.Providers.Select(p => new Item(p.Name, p.Id)), config.Provider, v =>
+            {
+                config.Provider = (string)v;
+                Changed();
+                ShowProviderFields();
+            });
             Row(voiceGrid, T("Engine", "엔진"), providerBox);
-            var voices = new List<Item> { new Item(T("Automatic (the alert's language)", "자동 (알림 언어에 맞춰)"), "") };
-            voices.AddRange(service.Provider.GetVoices().Select(v => new Item(v.Name, v.Id)));
-            Row(voiceGrid, T("Voice", "목소리"), Combo(voices, config.Voice, v => { config.Voice = (string)v; Changed(); }));
+            // The chosen engine's own settings (voice, or address, key...), made again when it changes.
+            providerFields = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+            voice.Controls.Add(providerFields);
+            var voiceGrid2 = Grid(voice);
+            voiceGrid = voiceGrid2;
             Row(voiceGrid, T("Speed", "속도"), Slider(-10, 10, config.Rate, v => { config.Rate = v; Changed(); }, v => v == 0 ? T("normal", "보통") : (v > 0 ? "+" : "") + v));
             var devices = new List<Item> { new Item(T("Default device", "기본 장치"), "") };
             devices.AddRange(TtsPlayer.GetDevices().Select(d => new Item(d.Name, d.Id)));
             Row(voiceGrid, T("Output", "출력 장치"), Combo(devices, config.OutputDevice, v => config.OutputDevice = (string)v));
+
+            // Voices over the network.
+            var network = Section(root, T("Voices over the network", "네트워크 음성"));
+            var networkGrid = Grid(network);
+            Row(networkGrid, T("Windows' voice instead if not ready within", "이 시간 안에 안 오면 Windows 음성으로 대신 읽기"), Seconds(config.FallbackMs, 0.1m, 5, v => config.FallbackMs = v, 0.1m));
+            var cacheRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            var cacheBox = new NumericUpDown { Minimum = 0, Maximum = 10000, Increment = 50, Width = 80, Value = Math.Max(0, Math.Min(10000, config.DiskCacheMB)) };
+            cacheBox.ValueChanged += (o, e) =>
+            {
+                if (loading)
+                    return;
+                config.DiskCacheMB = (int)cacheBox.Value;
+                pluginConfig.MarkDirty();
+            };
+            cacheRow.Controls.Add(cacheBox);
+            cacheRow.Controls.Add(new Label { Text = "MB", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 12, 3) });
+            cacheSize = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 12, 3) };
+            cacheRow.Controls.Add(cacheSize);
+            cacheRow.Controls.Add(Button(T("Empty", "비우기"), () =>
+            {
+                service.ClearCaches();
+                ShowCacheSize();
+            }));
+            Row(networkGrid, T("Keep fetched speech on disk", "받은 음성을 디스크에 보관"), cacheRow);
+            network.Controls.Add(Hint(T("An alert is fetched (and paid for) once; after that it plays at once, also after restarting ACT.",
+                "한 번 받은 알림은 다시 받지 않고(요금도 한 번) 바로 재생합니다. ACT를 다시 시작해도 남습니다.")));
 
             // How loud.
             var volume = Section(root, T("Volume", "볼륨"));
@@ -131,9 +166,145 @@ namespace RainbowMage.OverlayPlugin.Tts
                     ShowOwner();
             };
             ShowOwner();
+            ShowProviderFields();
+            ShowCacheSize();
             ShowSpoken();
             loading = false;
         }
+
+        private void ShowCacheSize()
+        {
+            long bytes = service.DiskCache.Size();
+            cacheSize.Text = T($"now {bytes / 1024.0 / 1024.0:0.0} MB", $"지금 {bytes / 1024.0 / 1024.0:0.0}MB");
+        }
+
+        // The engine's own settings: Windows' voices to pick from, or a service's fields.
+        private void ShowProviderFields()
+        {
+            bool wasLoading = loading;
+            loading = true;
+            providerFields.SuspendLayout();
+            foreach (Control c in providerFields.Controls.Cast<Control>().ToList())
+                c.Dispose();
+            providerFields.Controls.Clear();
+            var provider = service.Provider;
+            var grid = Grid(providerFields);
+            if (!provider.IsRemote)
+            {
+                var voices = new List<Item> { new Item(T("Automatic (the alert's language)", "자동 (알림 언어에 맞춰)"), "") };
+                voices.AddRange(provider.GetVoices(service.Settings).Select(v => new Item(v.Name, v.Id)));
+                Row(grid, T("Voice", "목소리"), Combo(voices, config.Voice, v => { config.Voice = (string)v; Changed(); }));
+            }
+            else
+            {
+                foreach (var field in provider.Fields)
+                    Row(grid, ko ? field.LabelKo : field.Label, FieldControl(provider, field));
+                providerFields.Controls.Add(Hint(T("Your own key and its costs; the key is kept encrypted for this Windows user.",
+                    "본인 키를 쓰며 요금도 본인 계정에 나옵니다. 키는 이 Windows 사용자만 풀 수 있게 암호화해 저장합니다.")));
+            }
+            providerFields.ResumeLayout();
+            loading = wasLoading;
+        }
+
+        private Control FieldControl(ITtsProvider provider, TtsField field)
+        {
+            config.ProviderSettings.TryGetValue(provider.Id, out var saved);
+            string value = null;
+            saved?.TryGetValue(field.Key, out value);
+            if (field.Kind == TtsFieldKind.Secret)
+                value = TtsSecrets.Unprotect(value);
+            if (string.IsNullOrEmpty(value))
+                value = field.Default;
+
+            void Save(string v)
+            {
+                if (loading)
+                    return;
+                if (!config.ProviderSettings.TryGetValue(provider.Id, out var dict))
+                    config.ProviderSettings[provider.Id] = dict = new Dictionary<string, string>();
+                dict[field.Key] = field.Kind == TtsFieldKind.Secret ? TtsSecrets.Protect(v) : v;
+                Changed();
+            }
+
+            Control input;
+            if (field.Kind == TtsFieldKind.Choice)
+            {
+                var box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 380 };
+                box.Items.AddRange(field.Choices.Cast<object>().ToArray());
+                box.SelectedItem = field.Choices.Contains(value) ? value : field.Choices.FirstOrDefault();
+                box.SelectedIndexChanged += (o, e) => Save(box.SelectedItem as string ?? "");
+                input = box;
+            }
+            else if (field.Key == "voice" && provider is ITtsVoiceSource)
+            {
+                // Typed, or picked from the list the service gives.
+                var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+                var box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 380, Text = value };
+                box.TextChanged += (o, e) => Save(VoiceId(box));
+                var status = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) };
+                row.Controls.Add(box);
+                row.Controls.Add(Button(T("Fetch the list", "목록 불러오기"), async () =>
+                {
+                    status.Text = T("fetching...", "불러오는 중...");
+                    try
+                    {
+                        var voices = await service.FetchVoicesAsync();
+                        if (box.IsDisposed)
+                            return;
+                        var current = box.Text;
+                        box.Items.Clear();
+                        // The alert language's voices first.
+                        var lang = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+                        foreach (var v in voices.OrderBy(v => v.Lang == lang ? 0 : 1).ThenBy(v => v.Name))
+                            box.Items.Add(new Item(v.Name, v.Id));
+                        box.Text = current;
+                        status.Text = T($"{voices.Count} voices", $"목소리 {voices.Count}개");
+                        box.DroppedDown = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!status.IsDisposed)
+                            status.Text = T("failed: ", "실패: ") + ex.GetBaseException().Message;
+                    }
+                }));
+                row.Controls.Add(status);
+                input = row;
+            }
+            else
+            {
+                var box = new TextBox { Width = 380, Text = value };
+                if (field.Kind == TtsFieldKind.Secret)
+                    box.UseSystemPasswordChar = true;
+                if (field.Kind == TtsFieldKind.Multiline)
+                {
+                    box.Multiline = true;
+                    box.Height = Font.Height * 4;
+                    box.ScrollBars = ScrollBars.Vertical;
+                    box.Text = value.Replace("\r\n", "\n").Replace("\n", Environment.NewLine);
+                }
+                box.TextChanged += (o, e) => Save(box.Text.Replace(Environment.NewLine, "\n"));
+                input = box;
+            }
+            if (string.IsNullOrEmpty(ko ? field.HintKo : field.Hint))
+                return input;
+            var stack = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+            stack.Controls.Add(input);
+            stack.Controls.Add(Hint(ko ? field.HintKo : field.Hint));
+            return stack;
+        }
+
+        // A voice picked from the list is shown by name; its ID is what is saved.
+        private static string VoiceId(ComboBox box) =>
+            box.SelectedItem is Item item && item.Name == box.Text ? (string)item.Value : box.Text.Trim();
+
+        private static Label Hint(string text) => new Label
+        {
+            Text = text,
+            AutoSize = true,
+            MaximumSize = new Size(560, 0),
+            ForeColor = SystemColors.GrayText,
+            Margin = new Padding(3, 0, 3, 6),
+        };
 
         private static string Lang() => CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
 
@@ -184,8 +355,14 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 if (IsDisposed)
                     return;
+                if (r.Error != null && r.MadeMs == 0)
+                {
+                    previewResult.Text = T("Could not say it: ", "읽지 못했습니다: ") + r.Error;
+                    return;
+                }
                 previewResult.Text = T($"Made in {r.MadeMs:0} ms, playing {r.StartedMs:0} ms after asked{(r.FromCache ? " (kept from before)" : "")}",
-                    $"만드는 데 {r.MadeMs:0}ms, 요청부터 재생까지 {r.StartedMs:0}ms{(r.FromCache ? " (만들어 둔 음성)" : "")}");
+                    $"만드는 데 {r.MadeMs:0}ms, 요청부터 재생까지 {r.StartedMs:0}ms{(r.FromCache ? " (만들어 둔 음성)" : "")}") +
+                    (r.FellBack ? T(" - Windows' voice instead: ", " · Windows 음성으로 대신 읽음: ") + (r.Error ?? T("slower than the fallback time (kept for next time)", "대신 읽기 시간보다 늦음 (다음부터는 받은 음성으로)")) : "");
             }));
         }
 
@@ -321,7 +498,8 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         private static void Row(TableLayoutPanel grid, string label, Control control)
         {
-            grid.Controls.Add(new Label { Text = label, AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 12, 3) });
+            // One width for all labels, so the rows of a section line up across its tables.
+            grid.Controls.Add(new Label { Text = label, AutoSize = true, MinimumSize = new Size(grid.Font.Height * 12, 0), Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 12, 3) });
             grid.Controls.Add(control);
         }
 
@@ -372,10 +550,10 @@ namespace RainbowMage.OverlayPlugin.Tts
             return row;
         }
 
-        private Control Seconds(int ms, decimal min, decimal max, Action<int> set)
+        private Control Seconds(int ms, decimal min, decimal max, Action<int> set, decimal step = 0.5m)
         {
             var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-            var box = new NumericUpDown { Minimum = min, Maximum = max, DecimalPlaces = 1, Increment = 0.5m, Width = 70, Value = Math.Max(min, Math.Min(max, ms / 1000m)) };
+            var box = new NumericUpDown { Minimum = min, Maximum = max, DecimalPlaces = 1, Increment = step, Width = 70, Value = Math.Max(min, Math.Min(max, ms / 1000m)) };
             box.ValueChanged += (o, e) =>
             {
                 if (loading)
@@ -386,6 +564,13 @@ namespace RainbowMage.OverlayPlugin.Tts
             row.Controls.Add(box);
             row.Controls.Add(new Label { Text = T("s", "초"), AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) });
             return row;
+        }
+
+        private static Button Button(string text, Func<System.Threading.Tasks.Task> click)
+        {
+            var button = new Button { Text = text, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(8, 2, 8, 2) };
+            button.Click += async (o, e) => await click();
+            return button;
         }
 
         private static Button Button(string text, Action click)

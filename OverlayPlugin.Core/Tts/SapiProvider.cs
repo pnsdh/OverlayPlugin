@@ -17,10 +17,14 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         public string Id => ProviderId;
         public string Name => "Windows";
+        public bool IsRemote => false;
+        public IReadOnlyList<TtsField> Fields { get; } = new TtsField[0];
 
         private SpeechSynthesizer synth;
         private string selected;
         private List<TtsVoice> voices;
+
+        public IReadOnlyList<TtsVoice> GetVoices(TtsSettings settings) => GetVoices();
 
         public IReadOnlyList<TtsVoice> GetVoices()
         {
@@ -39,7 +43,10 @@ namespace RainbowMage.OverlayPlugin.Tts
             return voices;
         }
 
-        public TtsClip Synthesize(string text, TtsVoice voice, int rate, CancellationToken cancel)
+        public TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel) =>
+            Synthesize(request.Text, request.Voice, request.Rate);
+
+        public TtsClip Synthesize(string text, TtsVoice voice, int rate)
         {
             if (synth == null)
                 synth = new SpeechSynthesizer();

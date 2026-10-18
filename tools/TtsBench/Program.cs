@@ -18,10 +18,14 @@ static class Program
     static int Main(string[] args)
     {
         string libs = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\..\out\Release\libs"));
+        // ACT itself, the copy the plugin is built against (not running: only its types).
+        string act = Path.GetFullPath(Path.Combine(libs, @"..\..\..\Thirdparty\ACT"));
         AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
         {
-            string file = Path.Combine(libs, new AssemblyName(e.Name).Name + ".dll");
-            return File.Exists(file) ? Assembly.LoadFrom(file) : null;
+            foreach (var file in new[] { Path.Combine(libs, new AssemblyName(e.Name).Name + ".dll"), Path.Combine(act, new AssemblyName(e.Name).Name + ".exe") })
+                if (File.Exists(file))
+                    return Assembly.LoadFrom(file);
+            return null;
         };
         return Run(args);
     }
@@ -38,7 +42,7 @@ static class Program
         container.Register<ILogger>(logger);
         var config = new TtsConfig { Volume = volume };
         var tts = new TtsService(container, config);
-        var voices = tts.Provider.GetVoices();
+        var voices = tts.Provider.GetVoices(tts.Settings);
         Console.WriteLine("voices: " + string.Join(", ", voices.Select(x => x.Name)));
         if (Opt("--voice") is string voice)
             config.Voice = voices.FirstOrDefault(x => x.Name.Contains(voice))?.Id ?? "";
@@ -96,6 +100,103 @@ static class Program
                 Console.WriteLine($"  played: {r.Spoken} (playing {r.StartedMs:0.0}ms after asked)");
 
         tts.Dispose();
+        return RemoteTest(container, volume);
+    }
+
+    // A network voice against a fake OpenAI-compatible server on this PC (no real service, no
+    // key): a quick answer is used, a slow one is replaced by Windows' voice and kept for next
+    // time, an error says why, and what came is found on disk by a new engine.
+    static int RemoteTest(TinyIoCContainer container, int volume)
+    {
+        Console.WriteLine("\n== network voice (fake server on 127.0.0.1)");
+        var listener = new System.Net.HttpListener();
+        listener.Prefixes.Add("http://127.0.0.1:18765/");
+        listener.Start();
+        int requests = 0;
+        new Thread(() =>
+        {
+            while (listener.IsListening)
+            {
+                System.Net.HttpListenerContext ctx;
+                try { ctx = listener.GetContext(); } catch { return; }
+                Interlocked.Increment(ref requests);
+                string body = new StreamReader(ctx.Request.InputStream).ReadToEnd();
+                var json = Newtonsoft.Json.Linq.JObject.Parse(body);
+                string input = (string)json["input"];
+                if (ctx.Request.Headers["Authorization"] != "Bearer good-key")
+                {
+                    ctx.Response.StatusCode = 401;
+                    var err = System.Text.Encoding.UTF8.GetBytes("{\"error\":{\"message\":\"Incorrect API key provided\"}}");
+                    ctx.Response.OutputStream.Write(err, 0, err.Length);
+                    ctx.Response.Close();
+                    continue;
+                }
+                Thread.Sleep(input.Contains("느림") ? 1500 : 150);
+                var wav = Wav(0.4);
+                ctx.Response.ContentType = "audio/wav";
+                ctx.Response.OutputStream.Write(wav, 0, wav.Length);
+                ctx.Response.Close();
+            }
+        }) { IsBackground = true }.Start();
+
+        string cacheDir = Path.Combine(Path.GetTempPath(), "OverlayPluginTtsCache");
+        var config = new TtsConfig { Volume = volume, Provider = "openai", FallbackMs = 800, RepeatWindowMs = 0 };
+        config.ProviderSettings["openai"] = new Dictionary<string, string>
+        {
+            ["url"] = "http://127.0.0.1:18765/v1",
+            ["key"] = TtsSecrets.Protect("good-key"),
+            ["model"] = "fake",
+            ["voice"] = "bench-" + Guid.NewGuid().ToString("N").Substring(0, 6),
+        };
+        var tts = new TtsService(container, config);
+        var results = new List<TtsResult>();
+        var done = new AutoResetEvent(false);
+        tts.Spoken += r => { lock (results) results.Add(r); done.Set(); };
+        TtsResult Say(string text)
+        {
+            lock (results) results.Clear();
+            tts.Speak(text, TtsSeverity.Alarm, "bench", "ko");
+            done.WaitOne(5000);
+            Thread.Sleep(700);
+            lock (results) return results.LastOrDefault();
+        }
+        void Show(string what, TtsResult r) => Console.WriteLine($"  {what,-34} made {r?.MadeMs,6:0} ms  {(r?.FromCache == true ? "kept " : "")}{(r?.FellBack == true ? "WINDOWS: " + (r.Error ?? "slow") : "network")}");
+        Thread.Sleep(1500);
+        Show("quick answer (150 ms)", Say("빠른 응답"));
+        Show("slow answer (1500 ms > 800)", Say("느림 응답"));
+        Thread.Sleep(1200);
+        Show("slow one again (came meanwhile)", Say("느림 응답"));
+        Show("quick one again", Say("빠른 응답"));
+        tts.Dispose();
+
+        var tts2 = new TtsService(container, config);
+        tts2.Spoken += r => { lock (results) results.Add(r); done.Set(); };
+        tts = tts2;
+        Thread.Sleep(1500);
+        int before = requests;
+        Show("after restart (from disk)", Say("빠른 응답"));
+        Console.WriteLine($"  requests to the server for it: {requests - before}");
+        config.ProviderSettings["openai"]["key"] = TtsSecrets.Protect("bad-key");
+        tts2.ConfigChanged();
+        Show("bad key", Say("새 문장"));
+        tts2.Dispose();
+        listener.Stop();
+        Console.WriteLine($"  disk cache: {cacheDir}");
         return 0;
+    }
+
+    // A WAV of a short tone at 24 kHz.
+    static byte[] Wav(double seconds)
+    {
+        int rate = 24000, n = (int)(rate * seconds);
+        var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF")); w.Write(36 + n * 2);
+        w.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt ")); w.Write(16); w.Write((short)1); w.Write((short)1);
+        w.Write(rate); w.Write(rate * 2); w.Write((short)2); w.Write((short)16);
+        w.Write(System.Text.Encoding.ASCII.GetBytes("data")); w.Write(n * 2);
+        for (int i = 0; i < n; i++)
+            w.Write((short)(Math.Sin(i * 2 * Math.PI * 440 / rate) * 8000));
+        return ms.ToArray();
     }
 }

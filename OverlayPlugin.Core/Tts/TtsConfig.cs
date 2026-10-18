@@ -32,6 +32,18 @@ namespace RainbowMage.OverlayPlugin.Tts
         public int InfoVolume { get; set; } = 100;
         public int OtherVolume { get; set; } = 100;
 
+        // Each provider's own settings (address, key, voice...) by provider and field.  Secrets
+        // are kept encrypted for this Windows user (see TtsSecrets).
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public Dictionary<string, Dictionary<string, string>> ProviderSettings { get; set; } = new Dictionary<string, Dictionary<string, string>>();
+
+        // A voice over the network not ready this soon: Windows' voice says it now (the network's
+        // is kept for next time).
+        public int FallbackMs { get; set; } = 800;
+
+        // Speech from the network kept on disk (megabytes), so an alert is fetched once.
+        public int DiskCacheMB { get; set; } = 300;
+
         // An output device's ID (Windows' audio endpoint); empty: the default one.
         public string OutputDevice { get; set; } = "";
 

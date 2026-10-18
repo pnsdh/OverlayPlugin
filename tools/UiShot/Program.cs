@@ -134,6 +134,15 @@ static class Program
                 container.Register(new RainbowMage.OverlayPlugin.Tts.TtsService(container, config.Tts));
             return new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
         });
+        Shoot("TtsConfigPanel-network", () =>
+        {
+            // As with a service chosen (its fields shown instead of Windows' voices).
+            config.Tts.Provider = "azure";
+            container.Resolve<RainbowMage.OverlayPlugin.Tts.TtsService>().ConfigChanged();
+            var panel = new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
+            config.Tts.Provider = "sapi";
+            return panel;
+        });
         Shoot("WSConfigPanel", () => new WSConfigPanel(container));
         Shoot("BuiltinEventConfigPanel", () =>
         {
