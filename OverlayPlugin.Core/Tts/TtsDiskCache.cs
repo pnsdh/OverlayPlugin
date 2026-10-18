@@ -82,6 +82,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                 try
                 {
                     var path = Path.Combine(folder, IndexName);
+                    // Left from a swap that did not finish.
+                    if (!File.Exists(path) && File.Exists(path + ".tmp"))
+                        File.Move(path + ".tmp", path);
                     if (File.Exists(path))
                     {
                         foreach (var line in File.ReadLines(path))
@@ -119,9 +122,12 @@ namespace RainbowMage.OverlayPlugin.Tts
                 Directory.CreateDirectory(folder);
                 var path = Path.Combine(folder, IndexName);
                 File.WriteAllLines(path + ".tmp", index.Values.Select(i => JsonConvert.SerializeObject(i)));
+                // Swapped in one step (a crash in between must not lose it: without it, paid
+                // speech would look free and go first).
                 if (File.Exists(path))
-                    File.Delete(path);
-                File.Move(path + ".tmp", path);
+                    File.Replace(path + ".tmp", path, null);
+                else
+                    File.Move(path + ".tmp", path);
             }
             catch (Exception)
             {

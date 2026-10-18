@@ -38,6 +38,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private TabPage madePage;
         private DataGridView madeGrid;
         private List<TtsCacheGroup> madeGroups = new List<TtsCacheGroup>();
+        private int madeGeneration;
         private Action refreshUsage;
         private bool loading;
 
@@ -82,6 +83,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             foreach (Control c in Controls.Cast<Control>().ToList())
                 c.Dispose();
             Controls.Clear();
+            madeGroups = new List<TtsCacheGroup>();
             tabs = new TabControl { Dock = DockStyle.Fill };
             Controls.Add(tabs);
             Controls.Add(PreviewStrip());
@@ -129,8 +131,8 @@ namespace RainbowMage.OverlayPlugin.Tts
 
             var reset = Section(basic, T("Settings", "설정"));
             reset.Controls.Add(Button(T("Reset settings to defaults...", "설정을 기본값으로..."), ResetToDefaults));
-            reset.Controls.Add(Hint(T("API keys, downloaded models, usage counts, made speech and your own rules are kept.",
-                "API 키, 내려받은 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다.")));
+            reset.Controls.Add(Hint(T("Engines' voices and quality go back too; API keys, addresses and regions, downloaded models, usage counts, made speech and your own rules are kept.",
+                "엔진별 목소리·품질도 돌아가고, API 키·주소·지역, 내려받은 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다.")));
 
             // When alerts come together.
             var alerts = Page(T("Alerts", "알림 처리"));
@@ -225,7 +227,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                     return;
                 }
                 UpdateSpeed();
-                if (loading)
+                if (loading || Math.Abs(config.Speed - speedBar.Value / 100.0) < 1e-9)
                     return;
                 config.Speed = speedBar.Value / 100.0;
                 Changed();
@@ -298,6 +300,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             row.Controls.Add(previewText);
             row.Controls.Add(Button(T("Read", "읽기"), () =>
             {
+                if (string.IsNullOrWhiteSpace(previewText.Text))
+                {
+                    previewResult.Text = T("Nothing to read.", "읽을 글자가 없습니다.");
+                    return;
+                }
                 previewResult.Text = T("making...", "만드는 중...");
                 service.Speak(previewText.Text, TtsSeverity.Alarm, "preview", Lang());
             }));
@@ -314,8 +321,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         private void ResetToDefaults()
         {
             if (MessageBox.Show(this,
-                T("Reset the TTS settings to their defaults? API keys, downloaded models, usage counts, made speech and your own rules are kept.",
-                  "TTS 설정을 기본값으로 되돌릴까요? API 키, 내려받은 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다."),
+                T("Reset the TTS settings to their defaults, engines' voices and quality included? API keys, addresses and regions, a hand-written HTTP request, downloaded models, usage counts, made speech and your own rules are kept.",
+                  "TTS 설정을 기본값으로 되돌릴까요? 엔진별 목소리·품질 같은 설정도 돌아갑니다. API 키·주소·지역, 직접 작성한 HTTP 요청, 내려받은 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다."),
                 "TTS", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
             var d = new TtsConfig();
@@ -339,6 +346,16 @@ namespace RainbowMage.OverlayPlugin.Tts
             config.PrepareAhead = d.PrepareAhead;
             config.PrepareAheadLocal = d.PrepareAheadLocal;
             config.Replacements = TtsTextProcessor.DefaultReplacements().Concat(config.Replacements.Where(r => !r.BuiltIn)).ToList();
+            foreach (var provider in service.Providers)
+            {
+                if (provider.Id == "http" || !config.ProviderSettings.TryGetValue(provider.Id, out var saved) || saved == null)
+                    continue;
+                foreach (var field in provider.Fields)
+                {
+                    if (field.Kind != TtsFieldKind.Secret && field.Key != "url" && field.Key != "region" && field.Key != "id")
+                        saved.Remove(field.Key);
+                }
+            }
             bridge?.Apply();
             service.ConfigChanged();
             pluginConfig.MarkDirty();
@@ -418,9 +435,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (madeGrid == null)
                 return;
             var grid = madeGrid;
+            int generation = ++madeGeneration;
             System.Threading.Tasks.Task.Run(() => service.DiskCache.Groups()).ContinueWith(t =>
             {
-                if (grid.IsDisposed || t.IsFaulted)
+                // An older scan finishing after a newer one (e.g. after a delete) is not shown.
+                if (grid.IsDisposed || t.IsFaulted || generation != madeGeneration)
                     return;
                 madeGroups = t.Result;
                 grid.Rows.Clear();
@@ -452,9 +471,14 @@ namespace RainbowMage.OverlayPlugin.Tts
                     $"그중 {paid:N0}개는 유료 서비스로 만든 것입니다. 지우면 필요할 때 다시 만들며 요금도 다시 듭니다.");
             if (MessageBox.Show(this, message, "TTS", MessageBoxButtons.OKCancel, paid > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.OK)
                 return;
-            service.DiskCache.Delete(groups.SelectMany(g => g.Files));
-            service.ClearMemory();
-            RefreshMade();
+            // Off the UI thread (thousands of files take a while), shown again when done.
+            var names = groups.SelectMany(g => g.Files).ToList();
+            System.Threading.Tasks.Task.Run(() => service.DiskCache.Delete(names)).ContinueWith(_ =>
+            {
+                service.ClearMemory();
+                if (!IsDisposed)
+                    RefreshMade();
+            }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
         }
 
         // The engine's own settings: Windows' voices to pick from, or a service's fields.
@@ -591,6 +615,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             buttons.Controls.Add(Button(T("Reset the count", "사용량 초기화"), () =>
             {
+                if (MessageBox.Show(this,
+                    T("Clear this service's counts (this month, last month, in all)? The monthly limit then counts from 0.",
+                      "이 서비스의 사용량(이번 달, 지난달, 누적)을 지울까요? 월 한도도 0부터 다시 셉니다."),
+                    "TTS", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
+                    return;
                 service.Usage.Reset(provider);
                 pluginConfig.MarkDirty();
                 refreshUsage?.Invoke();
@@ -859,6 +888,9 @@ namespace RainbowMage.OverlayPlugin.Tts
         private void OnSpoken(TtsResult r)
         {
             if (IsDisposed || !IsHandleCreated)
+                return;
+            // Alerts read meanwhile are not the preview's result.
+            if (!r.Preview)
                 return;
             BeginInvoke((Action)(() =>
             {

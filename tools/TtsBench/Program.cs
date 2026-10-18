@@ -225,6 +225,18 @@ static class Program
             var r = results.LastOrDefault();
             Console.WriteLine($"  preview of a slow voice: {(r == null ? "nothing" : r.FellBack ? "FAIL: Windows' voice" : $"ok, the voice itself after {r.MadeMs:0} ms")}");
         }
+        // An alert while a preview waits for a slow voice: the alert is read, the preview gives way.
+        lock (results) results.Clear();
+        tts2.Speak("느림 미리 듣기 둘", TtsSeverity.Alarm, "preview", "ko");
+        Thread.Sleep(300);
+        tts2.Speak("새 알림 빠름", TtsSeverity.Info, "bench", "ko");
+        Thread.Sleep(1500);
+        lock (results)
+        {
+            var alert = results.FirstOrDefault(r => r.Text == "새 알림 빠름");
+            var preview = results.FirstOrDefault(r => r.Text == "느림 미리 듣기 둘");
+            Console.WriteLine($"  preview gives way: alert {(alert == null ? "FAIL: not read" : $"read {alert.StartedMs:0} ms after asked")}, preview: {preview?.Error ?? "(no report)"}");
+        }
         // What is kept on disk, by voice and zone; a group removed.
         Thread.Sleep(500);
         var groups = tts2.DiskCache.Groups();

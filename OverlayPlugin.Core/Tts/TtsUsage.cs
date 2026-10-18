@@ -56,6 +56,9 @@ namespace RainbowMage.OverlayPlugin.Tts
     {
         private readonly TtsConfig config;
         private readonly object sync = new object();
+        // Characters being sent now, by provider: counted against the limit before they are sent,
+        // so texts sent at the same time cannot pass it together.
+        private readonly Dictionary<string, long> pending = new Dictionary<string, long>();
 
         // Something counted (for the settings to show it).
         public event Action Changed;
@@ -104,13 +107,30 @@ namespace RainbowMage.OverlayPlugin.Tts
             lock (sync)
             {
                 var usage = Get(provider);
-                if (usage.MonthlyLimit > 0 && usage.Chars + text.Length > usage.MonthlyLimit)
+                pending.TryGetValue(provider.Id, out long sending);
+                if (usage.MonthlyLimit > 0 && usage.Chars + sending + text.Length > usage.MonthlyLimit)
                 {
                     throw new InvalidOperationException(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
                         ? $"이번 달 한도({usage.MonthlyLimit:N0}자)에 닿아 Windows 음성으로 읽습니다"
                         : $"this month's limit ({usage.MonthlyLimit:N0} characters) is reached: Windows' voice reads instead");
                 }
+                pending[provider.Id] = sending + text.Length;
             }
+        }
+
+        // Nothing was sent after Check (it failed): its characters are not reserved any more.
+        public void Release(ITtsProvider provider, string text)
+        {
+            if (!Billed(provider))
+                return;
+            lock (sync)
+                Unreserve(provider, text);
+        }
+
+        private void Unreserve(ITtsProvider provider, string text)
+        {
+            if (pending.TryGetValue(provider.Id, out long sending))
+                pending[provider.Id] = Math.Max(0, sending - text.Length);
         }
 
         public void Sent(ITtsProvider provider, string text, bool prepared)
@@ -119,6 +139,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 return;
             lock (sync)
             {
+                Unreserve(provider, text);
                 var usage = Get(provider);
                 usage.Chars += text.Length;
                 usage.TotalChars += text.Length;

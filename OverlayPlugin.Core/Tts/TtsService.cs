@@ -44,6 +44,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         private long playingSince;
         private double playingSeconds;
         private bool warmed;
+        // Unloads Supertonic a while after it was loaded only for a preview (TTS off).
+        private Timer previewUnload;
         // Speech being fetched by a slow voice, by key: asked twice (made ahead, then needed), it
         // is fetched once.
         private readonly Dictionary<string, Task<TtsClip>> fetching = new Dictionary<string, Task<TtsClip>>();
@@ -112,8 +114,22 @@ namespace RainbowMage.OverlayPlugin.Tts
         // Zone changes from the FFXIV plugin, once it is there (the plugin's second start phase).
         public void WatchZone(FFXIVRepository repository)
         {
+            // (The FFXIV plugin has no way to unsubscribe: after shutdown the change is ignored.)
             repository.RegisterZoneChangeDelegate((id, name) =>
-                CurrentZone = string.IsNullOrEmpty(name) ? (id == 0 ? null : $"#{id}") : name);
+            {
+                if (!stopping)
+                    CurrentZone = string.IsNullOrEmpty(name) ? (id == 0 ? null : $"#{id}") : name;
+            });
+            // The zone ACT started in, by number until its name comes with a change.
+            try
+            {
+                var id = repository.GetCurrentTerritoryID();
+                if (CurrentZone == null && id.HasValue && id.Value != 0)
+                    CurrentZone = $"#{id.Value}";
+            }
+            catch (Exception)
+            {
+            }
         }
 
         private TtsCacheInfo Info(ITtsProvider provider, TtsVoice voice, string text) => new TtsCacheInfo
@@ -278,7 +294,15 @@ namespace RainbowMage.OverlayPlugin.Tts
             }
             // Trying Supertonic before turning TTS on: loaded for it (until a setting changes).
             if (request.Preview && Provider == supertonic && !config.Enabled)
+            {
                 supertonic.Warm(Settings);
+                previewUnload?.Dispose();
+                previewUnload = new Timer(_ =>
+                {
+                    if (!config.Enabled && !stopping)
+                        supertonic.Unload();
+                }, null, TimeSpan.FromMinutes(3), Timeout.InfiniteTimeSpan);
+            }
             // The output opens while the speech is made.
             ThreadPool.QueueUserWorkItem(_ => player.Prepare(config.OutputDevice));
             wake.Set();
@@ -347,6 +371,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                 catch (Exception e)
                 {
                     LogError($"could not say \"{next.Text}\": {e.Message}");
+                    next.Error = next.Error ?? e.Message;
+                    Report(next, 0, 0);
                     lock (sync)
                     {
                         playing = null;
@@ -377,6 +403,13 @@ namespace RainbowMage.OverlayPlugin.Tts
             var clip = request.Clip ?? Make(request);
             if (clip == null)
             {
+                if (request.Error == null)
+                {
+                    bool ko = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
+                    request.Error = request.Spoken == ""
+                        ? (ko ? "읽을 글자가 없습니다 (바꾸기 규칙 뒤 빈 문장)" : "nothing to read (empty after the rules)")
+                        : (ko ? "음성을 만들지 못했습니다" : "no speech was made");
+                }
                 Report(request, 0, 0);
                 return;
             }
@@ -428,7 +461,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         private void Report(Request request, double made, double started) =>
-            Spoken?.Invoke(new TtsResult(request.Text, request.Spoken, made, started, request.FromCache, request.FellBack, request.Error));
+            Spoken?.Invoke(new TtsResult(request.Text, request.Spoken, made, started, request.FromCache, request.FellBack, request.Error, request.Preview));
 
         // The next in line, made while something plays, so it starts as soon as that ends.
         private void MakeAhead()
@@ -475,13 +508,13 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         // What identifies a text's speech with the current settings (memory and disk caches).
         // (The language when the voice has none of its own, as some voices speak what they are told.)
-        private string KeyFor(ITtsProvider provider, TtsSettings s, TtsVoice voice, string lang, string spoken) =>
-            $"{provider.Id}|{s.Fingerprint(provider)}|{voice?.Id}|{(voice?.Lang == null ? lang : "")}|{SpeedFor(provider)}|{spoken}";
+        private string KeyFor(ITtsProvider provider, TtsSettings s, TtsVoice voice, string lang, string spoken, double speed) =>
+            $"{provider.Id}|{s.Fingerprint(provider)}|{voice?.Id}|{(voice?.Lang == null ? lang : "")}|{SpeedFor(provider, speed)}|{spoken}";
 
         // The speed the engine says it at (made speech is kept by it, so a speed it cannot reach
         // does not make the same speech twice).
-        private string SpeedFor(ITtsProvider provider) =>
-            Math.Max(provider.MinSpeed, Math.Min(provider.MaxSpeed, config.Speed)).ToString("0.00", CultureInfo.InvariantCulture);
+        private static string SpeedFor(ITtsProvider provider, double speed) =>
+            Math.Max(provider.MinSpeed, Math.Min(provider.MaxSpeed, speed)).ToString("0.00", CultureInfo.InvariantCulture);
 
         // What a request becomes with the current settings: the text to say, its key, the call.
         private class Planned
@@ -500,11 +533,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             request.Spoken = Processor(lang).Process(request.Text);
             if (request.Spoken == "")
                 return null;
+            double speed = config.Speed;
             return new Planned
             {
                 Provider = provider,
-                Key = KeyFor(provider, s, voice, lang, request.Spoken),
-                Synthesis = new TtsSynthesis { Text = request.Spoken, Voice = voice, Speed = config.Speed, Lang = lang, Settings = s },
+                Key = KeyFor(provider, s, voice, lang, request.Spoken, speed),
+                Synthesis = new TtsSynthesis { Text = request.Spoken, Voice = voice, Speed = speed, Lang = lang, Settings = s },
             };
         }
 
@@ -520,9 +554,18 @@ namespace RainbowMage.OverlayPlugin.Tts
                     try
                     {
                         Usage.Check(plan.Provider, plan.Synthesis.Text);
-                        var clip = plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None);
-                        if (clip != null)
-                            Usage.Sent(plan.Provider, plan.Synthesis.Text, false);
+                        TtsClip clip = null;
+                        try
+                        {
+                            clip = plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None);
+                        }
+                        finally
+                        {
+                            if (clip != null)
+                                Usage.Sent(plan.Provider, plan.Synthesis.Text, false);
+                            else
+                                Usage.Release(plan.Provider, plan.Synthesis.Text);
+                        }
                         return Keep(plan.Key, clip, Info(plan.Provider, plan.Synthesis.Voice, plan.Synthesis.Text));
                     }
                     finally
@@ -553,8 +596,9 @@ namespace RainbowMage.OverlayPlugin.Tts
             lang = string.IsNullOrEmpty(lang) ? CultureInfo.CurrentUICulture.TwoLetterISOLanguageName : lang;
             var voice = VoiceFor(provider, lang);
             var processor = Processor(voice?.Lang ?? lang);
+            double speed = config.Speed;
             var todo = texts.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => processor.Process(t)).Where(t => t != "")
-                .Distinct().Take(PrepareMax).Select(spoken => (spoken, key: KeyFor(provider, s, voice, voice?.Lang ?? lang, spoken)))
+                .Distinct().Take(PrepareMax).Select(spoken => (spoken, key: KeyFor(provider, s, voice, voice?.Lang ?? lang, spoken, speed)))
                 .Where(x => FromMemory(x.key) == null && !disk.Has(x.key)).ToList();
             int done = 0, failures = 0;
             PrepareProgress = (0, todo.Count);
@@ -569,6 +613,12 @@ namespace RainbowMage.OverlayPlugin.Tts
                     {
                         try
                         {
+                            // Made meanwhile (an alert came), or being made: not again.
+                            bool beingMade;
+                            lock (fetching)
+                                beingMade = fetching.ContainsKey(x.key);
+                            if (beingMade || FromMemory(x.key) != null || disk.Has(x.key))
+                                return;
                             try
                             {
                                 Usage.Check(provider, x.spoken);
@@ -580,12 +630,20 @@ namespace RainbowMage.OverlayPlugin.Tts
                                 state.Stop();
                                 return;
                             }
-                            var clip = provider.Synthesize(new TtsSynthesis { Text = x.spoken, Voice = voice, Speed = config.Speed, Lang = voice?.Lang ?? lang, Settings = s }, cancel);
-                            if (clip != null)
+                            TtsClip clip = null;
+                            try
                             {
-                                Usage.Sent(provider, x.spoken, true);
-                                disk.Put(x.key, clip, Info(provider, voice, x.spoken));
+                                clip = provider.Synthesize(new TtsSynthesis { Text = x.spoken, Voice = voice, Speed = speed, Lang = voice?.Lang ?? lang, Settings = s }, cancel);
                             }
+                            finally
+                            {
+                                if (clip != null)
+                                    Usage.Sent(provider, x.spoken, true);
+                                else
+                                    Usage.Release(provider, x.spoken);
+                            }
+                            if (clip != null)
+                                disk.Put(x.key, clip, Info(provider, voice, x.spoken));
                             Interlocked.Exchange(ref failures, 0);
                         }
                         catch (Exception e) when (!(e is OperationCanceledException))
@@ -616,8 +674,6 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (kept != null)
             {
                 request.FromCache = true;
-                if (plan.Provider.IsSlow)
-                    Usage.Kept(plan.Provider);
                 return kept;
             }
             if (!plan.Provider.IsSlow)
@@ -636,7 +692,29 @@ namespace RainbowMage.OverlayPlugin.Tts
             bool inTime;
             try
             {
-                inTime = fetch.Wait(request.Preview ? 60000 : Math.Max(50, config.FallbackMs));
+                if (request.Preview)
+                {
+                    // Waited for in short steps: an alert asked meanwhile (or a cut, or shutting
+                    // down) ends the wait, so the preview never holds alerts back.
+                    var waited = Stopwatch.StartNew();
+                    while (!(inTime = fetch.Wait(100)) && waited.ElapsedMilliseconds < 60000)
+                    {
+                        bool alert;
+                        lock (sync)
+                            alert = queue.Any(r => !r.Preview);
+                        if (alert || request.Cut || stopping)
+                        {
+                            request.Error = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
+                                ? "알림이 와서 미리 듣기를 멈췄습니다 (음성은 계속 만들어 보관)"
+                                : "an alert came: the preview stopped (the speech is still made and kept)";
+                            return null;
+                        }
+                    }
+                }
+                else
+                {
+                    inTime = fetch.Wait(Math.Max(50, config.FallbackMs));
+                }
             }
             catch (AggregateException e)
             {
@@ -668,8 +746,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                 return null;
             request.FellBack = true;
             var voice = VoiceFor(windows, lang);
-            string key = $"{windows.Id}||{voice?.Id}|{SpeedFor(windows)}|{request.Spoken}";
-            return FromMemory(key) ?? Keep(key, windows.Synthesize(request.Spoken, voice, config.Speed), null);
+            double speed = config.Speed;
+            string key = $"{windows.Id}||{voice?.Id}|{SpeedFor(windows, speed)}|{request.Spoken}";
+            return FromMemory(key) ?? Keep(key, windows.Synthesize(request.Spoken, voice, speed), null);
         }
 
         private TtsClip FromMemory(string key)
@@ -782,11 +861,13 @@ namespace RainbowMage.OverlayPlugin.Tts
                 return;
             stopping = true;
             preparing?.Cancel();
+            previewUnload?.Dispose();
             wake.Set();
             worker.Join(2000);
             player.Dispose();
             foreach (var p in providers.Values.OfType<IDisposable>())
                 p.Dispose();
+            ClearMemory();
         }
 
         private class Request
@@ -820,8 +901,12 @@ namespace RainbowMage.OverlayPlugin.Tts
         public bool FellBack { get; }
         public string Error { get; }
 
-        public TtsResult(string text, string spoken, double madeMs, double startedMs, bool fromCache, bool fellBack, string error)
+        // Asked by the settings' preview (the panel shows only those).
+        public bool Preview { get; }
+
+        public TtsResult(string text, string spoken, double madeMs, double startedMs, bool fromCache, bool fellBack, string error, bool preview = false)
         {
+            Preview = preview;
             Text = text;
             Spoken = spoken;
             MadeMs = madeMs;
