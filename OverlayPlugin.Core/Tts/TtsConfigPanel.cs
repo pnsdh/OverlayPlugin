@@ -100,7 +100,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
             var voice = Section(basic, T("Voice", "음성"));
             var voiceGrid = Grid(voice);
-            Row(voiceGrid, T("Engine", "엔진"), Combo(service.Providers.Select(p => new Item(p.Name, p.Id)), config.Provider, v =>
+            Row(voiceGrid, T("Engine", "엔진"), Combo(service.Providers.Select(p => new Item($"{p.Name}  —  {p.Note}", p.Id)), config.Provider, v =>
             {
                 config.Provider = (string)v;
                 Changed();
@@ -110,12 +110,13 @@ namespace RainbowMage.OverlayPlugin.Tts
             providerFields = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
             voice.Controls.Add(providerFields);
             var voiceGrid2 = Grid(voice);
-            Row(voiceGrid2, T("Speed", "속도"), Slider(-10, 10, config.Rate, v => { config.Rate = v; Changed(); }, v => v == 0 ? T("normal", "보통") : (v > 0 ? "+" : "") + v));
-            var devices = new List<Item> { new Item(T("Default device", "기본 장치"), "") };
-            devices.AddRange(TtsPlayer.GetDevices().Select(d => new Item(d.Name, d.Id)));
-            Row(voiceGrid2, T("Output", "출력 장치"), Combo(devices, config.OutputDevice, v => config.OutputDevice = (string)v));
+            Row(voiceGrid2, T("Speed", "속도"), SpeedSlider());
             speedHint = Hint("");
             voice.Controls.Add(speedHint);
+            var voiceGrid3 = Grid(voice);
+            var devices = new List<Item> { new Item(T("Default device", "기본 장치"), "") };
+            devices.AddRange(TtsPlayer.GetDevices().Select(d => new Item(d.Name, d.Id)));
+            Row(voiceGrid3, T("Output", "출력 장치"), Combo(devices, config.OutputDevice, v => config.OutputDevice = (string)v));
 
             var volume = Section(basic, T("Volume", "볼륨"));
             var volumeGrid = Grid(volume);
@@ -157,10 +158,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             // Made speech and usage.
             var made = Page(T("Made speech", "만든 음성·사용량"));
             madePage = (TabPage)made.Parent;
-            var network = Section(made, T("Slower voices (network, Supertonic)", "느린 음성 (네트워크, Supertonic)"));
+            var network = Section(made, T("Fallback and making ahead", "대신 읽기와 미리 만들기"));
             // Shown only for such a voice (see ShowProviderFields).
             slowSection = network;
             slowHeader = made.Controls[made.Controls.Count - 2];
+            network.Controls.Add(Hint(T("For engines that take time to make speech (services on the internet, Supertonic).",
+                "음성을 만드는 데 시간이 걸리는 엔진(인터넷 서비스, Supertonic)에 적용됩니다.")));
             var networkGrid = Grid(network);
             Row(networkGrid, T("Windows' voice instead if not ready within", "이 시간 안에 준비 안 되면 Windows 음성으로 대신 읽기"), Seconds(config.FallbackMs, 0.1m, 5, v => config.FallbackMs = v, 0.1m));
             network.Controls.Add(Hint(T("Not for the preview below, which waits for the voice itself.", "아래 미리 듣기에는 쓰지 않습니다 (그 목소리 자체를 기다림).")));
@@ -188,6 +191,71 @@ namespace RainbowMage.OverlayPlugin.Tts
             OnPrepared(service.PrepareProgress.Done, service.PrepareProgress.Total);
             ResumeLayout(true);
             loading = false;
+        }
+
+        private TrackBar speedBar;
+        private Label speedLabel;
+
+        // Speed as times the voice's own (0.50 to 2.00), the same for every engine; what the
+        // chosen one says it at is shown beside it when it cannot reach it.
+        private Control SpeedSlider()
+        {
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            speedBar = new TrackBar
+            {
+                Minimum = 50,
+                Maximum = 200,
+                TickFrequency = 25,
+                TickStyle = TickStyle.None,
+                SmallChange = 5,
+                LargeChange = 10,
+                Value = (int)Math.Round(Math.Max(0.5, Math.Min(2.0, config.Speed)) * 100),
+                Width = 300,
+                AutoSize = false,
+                Height = Font.Height + 12,
+            };
+            speedLabel = new Label { AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) };
+            speedBar.ValueChanged += (o, e) =>
+            {
+                // Steps of 0.05.
+                int snapped = (int)Math.Round(speedBar.Value / 5.0) * 5;
+                if (snapped != speedBar.Value)
+                {
+                    speedBar.Value = snapped;
+                    return;
+                }
+                UpdateSpeed();
+                if (loading)
+                    return;
+                config.Speed = speedBar.Value / 100.0;
+                Changed();
+            };
+            row.Controls.Add(speedBar);
+            row.Controls.Add(speedLabel);
+            return row;
+        }
+
+        private void UpdateSpeed()
+        {
+            if (speedLabel == null || speedBar == null)
+                return;
+            var provider = service.Provider;
+            double v = speedBar.Value / 100.0;
+            if (provider.MinSpeed >= provider.MaxSpeed)
+            {
+                speedLabel.Text = T($"{v:0.00}x", $"{v:0.00}배");
+                speedHint.Text = T($"{provider.Name} has no speed setting (its way of speaking can be told in words).",
+                    $"{provider.Name}에는 속도 설정이 없습니다 (말투 지시로 바꿀 수 있음).");
+            }
+            else
+            {
+                double effective = Math.Max(provider.MinSpeed, Math.Min(provider.MaxSpeed, v));
+                speedLabel.Text = T($"{v:0.00}x", $"{v:0.00}배") +
+                    (Math.Abs(effective - v) > 0.001 ? T($" (said at {effective:0.00}x)", $" (이 엔진은 {effective:0.00}배로 읽음)") : "");
+                speedHint.Text = T($"1.00x: the voice's own speed. {provider.Name}: {provider.MinSpeed:0.00}x to {provider.MaxSpeed:0.00}x (beyond: the nearest end).",
+                    $"1.00배가 그 목소리 본래 속도입니다. {provider.Name}: {provider.MinSpeed:0.00}~{provider.MaxSpeed:0.00}배 (그 밖은 가까운 끝값으로).");
+            }
+            speedHint.Visible = true;
         }
 
         private TableLayoutPanel Page(string title)
@@ -255,7 +323,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             config.DeferToOtherPlugin = d.DeferToOtherPlugin;
             config.Provider = d.Provider;
             config.Voice = d.Voice;
-            config.Rate = d.Rate;
+            config.Speed = d.Speed;
             config.Volume = d.Volume;
             config.AlarmVolume = d.AlarmVolume;
             config.AlertVolume = d.AlertVolume;
@@ -282,8 +350,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         private void MadeSection(TableLayoutPanel page)
         {
             var section = Section(page, T("Made speech on disk", "디스크에 보관한 음성"));
-            section.Controls.Add(Hint(T("Speech from slower voices is kept and played from here; it is not made (or paid for) again, also after restarting ACT. Over the size limit the oldest go first, free voices' before paid ones'.",
-                "느린 음성(네트워크, Supertonic)으로 만든 음성을 보관해 다시 만들지 않고(유료는 요금도 다시 안 듦) 바로 재생합니다. ACT를 다시 시작해도 남습니다. 크기 한도를 넘으면 오래된 것부터, 무료 음성 것을 먼저 지웁니다.")));
+            section.Controls.Add(Hint(T("Speech from services on the internet and Supertonic is kept and played from here; it is not made (or paid for) again, also after restarting ACT. Over the size limit the oldest go first, free voices' before paid ones'.",
+                "인터넷 서비스와 Supertonic으로 만든 음성을 보관해 다시 만들지 않고(유료는 요금도 다시 안 듦) 바로 재생합니다. ACT를 다시 시작해도 남습니다. 크기 한도를 넘으면 오래된 것부터, 무료 음성 것을 먼저 지웁니다.")));
             var sizeRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             var sizeBox = new NumericUpDown { Minimum = 0, Maximum = 10000, Increment = 50, Width = 80, Value = Math.Max(0, Math.Min(10000, config.DiskCacheMB)) };
             sizeBox.ValueChanged += (o, e) =>
@@ -429,14 +497,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 slowSection.Visible = slowHeader.Visible = provider.IsSlow;
                 localPrepare.Visible = provider is ITtsDownloadable;
             }
-            if (speedHint != null)
-            {
-                speedHint.Text = provider is Supertonic.SupertonicProvider
-                    ? T("Supertonic speaks well only from 0.9 to 1.5 times its speed: faster or slower is read at that end.",
-                        "Supertonic은 0.9~1.5배 속도만 제대로 읽어, 그보다 빠르거나 느린 값은 끝값으로 읽습니다.")
-                    : "";
-                speedHint.Visible = speedHint.Text != "";
-            }
+            UpdateSpeed();
             ShowUsage();
             loading = wasLoading;
         }

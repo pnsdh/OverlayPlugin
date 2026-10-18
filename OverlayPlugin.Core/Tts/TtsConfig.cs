@@ -23,7 +23,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         // A voice of the provider; empty: the first one for the alert language.
         public string Voice { get; set; } = "";
 
-        // -10 (slowest) to 10 (fastest), 0 the voice's own speed.
+        // Times the voice's own speed (0.5 to 2); each engine holds it within what it can say.
+        public double Speed { get; set; } = 1.0;
+
+        // The old setting (-10 to 10), read from older configs into Speed (see Fix).
         public int Rate { get; set; } = 0;
 
         // 0 to 100: all speech, then by how important the alert is.
@@ -95,6 +98,13 @@ namespace RainbowMage.OverlayPlugin.Tts
             Replacements.RemoveAll(r => r == null);
             if (Provider == null)
                 Provider = SapiProvider.ProviderId;
+            if (Rate != 0)
+            {
+                if (System.Math.Abs(Speed - 1.0) < 1e-9)
+                    Speed = System.Math.Round(System.Math.Pow(2, Rate / 10.0), 2);
+                Rate = 0;
+            }
+            Speed = System.Math.Max(0.5, System.Math.Min(2.0, Speed));
             if (Voice == null)
                 Voice = "";
             if (OutputDevice == null)

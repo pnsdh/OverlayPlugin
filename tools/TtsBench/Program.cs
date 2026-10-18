@@ -275,7 +275,7 @@ static class Program
         // Not chosen yet: refused (Windows' voice would say it).
         try
         {
-            provider.Synthesize(new TtsSynthesis { Text = "준비", Lang = "ko", Rate = 0, Settings = settings }, CancellationToken.None);
+            provider.Synthesize(new TtsSynthesis { Text = "준비", Lang = "ko", Settings = settings }, CancellationToken.None);
             Console.WriteLine("FAIL: made speech while not wanted");
         }
         catch (InvalidOperationException e)
@@ -284,7 +284,7 @@ static class Program
         }
         sw.Restart();
         provider.Warm(settings);
-        var warm = provider.Synthesize(new TtsSynthesis { Text = "준비", Lang = "ko", Rate = 0, Settings = settings }, CancellationToken.None);
+        var warm = provider.Synthesize(new TtsSynthesis { Text = "준비", Lang = "ko", Settings = settings }, CancellationToken.None);
         proc.Refresh();
         Console.WriteLine($"loaded + first text in {sw.ElapsedMilliseconds} ms, memory +{(proc.PrivateMemorySize64 - before) / 1048576} MB");
         foreach (var steps in new[] { "3", "5", "8" })
@@ -295,7 +295,7 @@ static class Program
             {
                 var cpu = proc.TotalProcessorTime;
                 sw.Restart();
-                var clip = provider.Synthesize(new TtsSynthesis { Text = text, Lang = "ko", Rate = 0, Settings = settings }, CancellationToken.None);
+                var clip = provider.Synthesize(new TtsSynthesis { Text = text, Lang = "ko", Settings = settings }, CancellationToken.None);
                 long ms = sw.ElapsedMilliseconds;
                 proc.Refresh();
                 double rms = Math.Sqrt(clip.Samples.Select(x => (double)x * x).Average());
@@ -306,7 +306,7 @@ static class Program
             }
         }
         // Unloaded while a text is being made: it ends, then the engine goes (no crash).
-        var running = System.Threading.Tasks.Task.Run(() => provider.Synthesize(new TtsSynthesis { Text = "보스와 멀리 떨어지기 다음 행동 멈추기, 그리고 산개", Lang = "ko", Rate = 0, Settings = settings }, CancellationToken.None));
+        var running = System.Threading.Tasks.Task.Run(() => provider.Synthesize(new TtsSynthesis { Text = "보스와 멀리 떨어지기 다음 행동 멈추기, 그리고 산개", Lang = "ko", Settings = settings }, CancellationToken.None));
         Thread.Sleep(80);
         provider.Unload();
         try
@@ -320,7 +320,7 @@ static class Program
         // Threads changed while chosen: loaded again with them, same speech key.
         provider.Warm(settings);
         config.ProviderSettings["supertonic"]["threads"] = "1";
-        var one = provider.Synthesize(new TtsSynthesis { Text = "산개", Lang = "ko", Rate = 0, Settings = new TtsSettings(provider, config) }, CancellationToken.None);
+        var one = provider.Synthesize(new TtsSynthesis { Text = "산개", Lang = "ko", Settings = new TtsSettings(provider, config) }, CancellationToken.None);
         Console.WriteLine($"1 thread: {one.Samples.Length / (double)one.SampleRate:0.00} s, key same: {settings.Fingerprint(provider) == new TtsSettings(provider, config).Fingerprint(provider)}");
         provider.Dispose();
         if (!keep)

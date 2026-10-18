@@ -27,6 +27,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly SapiProvider windows = new SapiProvider();
         private readonly Supertonic.SupertonicProvider supertonic = new Supertonic.SupertonicProvider();
         private readonly Dictionary<string, ITtsProvider> providers = new Dictionary<string, ITtsProvider>();
+        private readonly List<ITtsProvider> order = new List<ITtsProvider>();
 
         private readonly object sync = new object();
         private readonly List<Request> queue = new List<Request>();
@@ -76,13 +77,14 @@ namespace RainbowMage.OverlayPlugin.Tts
             disk = new TtsDiskCache(CacheFolder(), () => Math.Max(0, config.DiskCacheMB) * 1024L * 1024L);
             Supertonic.SupertonicModel.CleanUp();
             AddProvider(windows);
-            AddProvider(new OpenAiCompatibleProvider());
+            AddProvider(supertonic);
             AddProvider(new AzureProvider());
             AddProvider(new GoogleProvider());
+            AddProvider(new GeminiProvider());
             AddProvider(new ElevenLabsProvider());
+            AddProvider(new OpenAiCompatibleProvider());
             AddProvider(new ClovaProvider());
             AddProvider(new HttpTemplateProvider());
-            AddProvider(supertonic);
             Usage.Prepare(providers.Values);
             worker = new Thread(Run) { IsBackground = true, Name = "OverlayPlugin TTS" };
             worker.Start();
@@ -137,9 +139,16 @@ namespace RainbowMage.OverlayPlugin.Tts
         public TtsUsageCounter Usage { get; }
         public TtsDiskCache DiskCache => disk;
 
-        public IEnumerable<ITtsProvider> Providers => providers.Values;
+        // Free ones first, then services (as added).
+        public IEnumerable<ITtsProvider> Providers => order;
 
-        public void AddProvider(ITtsProvider provider) => providers[provider.Id] = provider;
+        public void AddProvider(ITtsProvider provider)
+        {
+            if (providers.ContainsKey(provider.Id))
+                order.Remove(providers[provider.Id]);
+            providers[provider.Id] = provider;
+            order.Add(provider);
+        }
 
         public ITtsProvider Provider => providers.TryGetValue(config.Provider ?? "", out var p) ? p : windows;
 
@@ -467,7 +476,12 @@ namespace RainbowMage.OverlayPlugin.Tts
         // What identifies a text's speech with the current settings (memory and disk caches).
         // (The language when the voice has none of its own, as some voices speak what they are told.)
         private string KeyFor(ITtsProvider provider, TtsSettings s, TtsVoice voice, string lang, string spoken) =>
-            $"{provider.Id}|{s.Fingerprint(provider)}|{voice?.Id}|{(voice?.Lang == null ? lang : "")}|{config.Rate}|{spoken}";
+            $"{provider.Id}|{s.Fingerprint(provider)}|{voice?.Id}|{(voice?.Lang == null ? lang : "")}|{SpeedFor(provider)}|{spoken}";
+
+        // The speed the engine says it at (made speech is kept by it, so a speed it cannot reach
+        // does not make the same speech twice).
+        private string SpeedFor(ITtsProvider provider) =>
+            Math.Max(provider.MinSpeed, Math.Min(provider.MaxSpeed, config.Speed)).ToString("0.00", CultureInfo.InvariantCulture);
 
         // What a request becomes with the current settings: the text to say, its key, the call.
         private class Planned
@@ -490,7 +504,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 Provider = provider,
                 Key = KeyFor(provider, s, voice, lang, request.Spoken),
-                Synthesis = new TtsSynthesis { Text = request.Spoken, Voice = voice, Rate = config.Rate, Lang = lang, Settings = s },
+                Synthesis = new TtsSynthesis { Text = request.Spoken, Voice = voice, Speed = config.Speed, Lang = lang, Settings = s },
             };
         }
 
@@ -566,7 +580,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                                 state.Stop();
                                 return;
                             }
-                            var clip = provider.Synthesize(new TtsSynthesis { Text = x.spoken, Voice = voice, Rate = config.Rate, Lang = voice?.Lang ?? lang, Settings = s }, cancel);
+                            var clip = provider.Synthesize(new TtsSynthesis { Text = x.spoken, Voice = voice, Speed = config.Speed, Lang = voice?.Lang ?? lang, Settings = s }, cancel);
                             if (clip != null)
                             {
                                 Usage.Sent(provider, x.spoken, true);
@@ -654,8 +668,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                 return null;
             request.FellBack = true;
             var voice = VoiceFor(windows, lang);
-            string key = $"{windows.Id}||{voice?.Id}|{config.Rate}|{request.Spoken}";
-            return FromMemory(key) ?? Keep(key, windows.Synthesize(request.Spoken, voice, config.Rate), null);
+            string key = $"{windows.Id}||{voice?.Id}|{SpeedFor(windows)}|{request.Spoken}";
+            return FromMemory(key) ?? Keep(key, windows.Synthesize(request.Spoken, voice, config.Speed), null);
         }
 
         private TtsClip FromMemory(string key)
@@ -752,7 +766,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             try
             {
                 var voice = VoiceFor(windows, CultureInfo.CurrentUICulture.TwoLetterISOLanguageName);
-                windows.Synthesize(".", voice, config.Rate);
+                windows.Synthesize(".", voice, config.Speed);
             }
             catch (Exception e)
             {

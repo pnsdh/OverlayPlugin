@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -18,7 +18,13 @@ namespace RainbowMage.OverlayPlugin.Tts
     {
         public abstract string Id { get; }
         public abstract string Name { get; }
+        public abstract string Note { get; }
+        public virtual double MinSpeed => 0.5;
+        public virtual double MaxSpeed => 2.0;
         public bool IsSlow => true;
+
+        protected static bool Ko => CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
+        protected double Clamp(double speed) => Math.Max(MinSpeed, Math.Min(MaxSpeed, speed));
         public int Parallel => 2;
         public abstract IReadOnlyList<TtsField> Fields { get; }
 
@@ -66,7 +72,8 @@ namespace RainbowMage.OverlayPlugin.Tts
     public class OpenAiCompatibleProvider : RemoteProvider
     {
         public override string Id => "openai";
-        public override string Name => "OpenAI / compatible (/v1/audio/speech)";
+        public override string Name => Ko ? "OpenAI 호환" : "OpenAI-compatible";
+        public override string Note => Ko ? "유료 (OpenAI), 내 PC의 호환 서버면 무료" : "paid (OpenAI); free with a compatible server on your PC";
 
         public override IReadOnlyList<TtsField> Fields { get; } = new[]
         {
@@ -89,7 +96,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 ["input"] = request.Text,
                 ["voice"] = Require(s, "voice", "voice"),
                 ["response_format"] = "wav",
-                ["speed"] = Math.Round(Math.Max(0.25, Math.Min(4, request.Speed)), 2),
+                ["speed"] = Math.Round(Clamp(request.Speed), 2),
             };
             if (!string.IsNullOrWhiteSpace(s["instructions"]))
                 body["instructions"] = s["instructions"];
@@ -127,6 +134,7 @@ namespace RainbowMage.OverlayPlugin.Tts
     {
         public override string Id => "azure";
         public override string Name => "Azure AI Speech";
+        public override string Note => Ko ? "유료, 매달 무료 사용량 있음" : "paid, a free amount each month";
 
         public override IReadOnlyList<TtsField> Fields { get; } = new[]
         {
@@ -143,7 +151,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             var s = request.Settings;
             var voice = Require(s, "voice", "voice");
             var lang = voice.Length >= 5 ? voice.Substring(0, 5) : "ko-KR";
-            string rate = ((int)Math.Round((request.Speed - 1) * 100)).ToString("+0;-0", CultureInfo.InvariantCulture) + "%";
+            string rate = ((int)Math.Round((Clamp(request.Speed) - 1) * 100)).ToString("+0;-0", CultureInfo.InvariantCulture) + "%";
             string text = $"<prosody rate=\"{rate}\">{SecurityElement.Escape(request.Text)}</prosody>";
             if (!string.IsNullOrWhiteSpace(s["style"]))
                 text = $"<mstts:express-as style=\"{SecurityElement.Escape(s["style"].Trim())}\">{text}</mstts:express-as>";
@@ -175,7 +183,8 @@ namespace RainbowMage.OverlayPlugin.Tts
     public class GoogleProvider : RemoteProvider
     {
         public override string Id => "google";
-        public override string Name => "Google Cloud Text-to-Speech";
+        public override string Name => "Google Cloud TTS";
+        public override string Note => Ko ? "유료, 매달 무료 사용량 있음" : "paid, a free amount each month";
 
         public override IReadOnlyList<TtsField> Fields { get; } = new[]
         {
@@ -195,7 +204,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 {
                     ["audioEncoding"] = "LINEAR16",
                     ["sampleRateHertz"] = 24000,
-                    ["speakingRate"] = Math.Round(Math.Max(0.25, Math.Min(4, request.Speed)), 2),
+                    ["speakingRate"] = Math.Round(Clamp(request.Speed), 2),
                 },
             };
             var url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + Uri.EscapeDataString(Require(s, "key", "API key"));
@@ -236,6 +245,9 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         public override string Id => "elevenlabs";
         public override string Name => "ElevenLabs";
+        public override string Note => Ko ? "유료, 무료 플랜 있음" : "paid, a free plan";
+        public override double MinSpeed => 0.7;
+        public override double MaxSpeed => 1.2;
 
         public override IReadOnlyList<TtsField> Fields { get; } = new[]
         {
@@ -251,7 +263,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 ["text"] = request.Text,
                 ["model_id"] = Require(s, "model", "model"),
-                ["voice_settings"] = new JObject { ["speed"] = Math.Round(Math.Max(0.7, Math.Min(1.2, request.Speed)), 2) },
+                ["voice_settings"] = new JObject { ["speed"] = Math.Round(Clamp(request.Speed), 2) },
             };
             if (!string.IsNullOrEmpty(request.Lang))
                 body["language_code"] = request.Lang;
@@ -274,11 +286,72 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
     }
 
+    // Google's Gemini speech (a key from Google AI Studio; its free tier has tight limits).  It has
+    // no speed setting: how to speak is said in words before the text, and it answers slower than
+    // the others, so made speech and fetching ahead matter most here.
+    public class GeminiProvider : RemoteProvider
+    {
+        public override string Id => "gemini";
+        public override string Name => "Gemini TTS";
+        public override string Note => Ko ? "유료, 무료 등급 있음 (제한 큼, 느림)" : "paid, a free tier (tight limits, slow)";
+        public override double MinSpeed => 1.0;
+        public override double MaxSpeed => 1.0;
+
+        private static readonly string[] voices =
+        {
+            "Kore", "Puck", "Charon", "Zephyr", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe", "Autonoe", "Enceladus",
+            "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", "Algenib", "Rasalgethi", "Laomedeia", "Achernar",
+            "Alnilam", "Schedar", "Gacrux", "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia",
+            "Sadaltager", "Sulafat",
+        };
+
+        public override IReadOnlyList<TtsField> Fields { get; } = new[]
+        {
+            Field("key", "API key", "API 키", TtsFieldKind.Secret, hint: "Google AI Studio > Get API key", hintKo: "Google AI Studio > Get API key"),
+            Field("model", "Model", "모델", def: "gemini-2.5-flash-preview-tts"),
+            Field("voice", "Voice", "목소리", def: "Kore"),
+            Field("style", "How to speak (said before the text)", "말투 지시 (문장 앞에 붙음)", TtsFieldKind.Multiline,
+                hint: "e.g. \"Say quickly and clearly, like a raid callout:\"", hintKo: "예: \"레이드 콜처럼 빠르고 또렷하게 말해:\""),
+        };
+
+        public override TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel)
+        {
+            var s = request.Settings;
+            var text = string.IsNullOrWhiteSpace(s["style"]) ? request.Text : s["style"].Trim() + "\n" + request.Text;
+            var body = new JObject
+            {
+                ["contents"] = new JArray { new JObject { ["parts"] = new JArray { new JObject { ["text"] = text } } } },
+                ["generationConfig"] = new JObject
+                {
+                    ["responseModalities"] = new JArray { "AUDIO" },
+                    ["speechConfig"] = new JObject
+                    {
+                        ["voiceConfig"] = new JObject { ["prebuiltVoiceConfig"] = new JObject { ["voiceName"] = Require(s, "voice", "voice") } },
+                    },
+                },
+            };
+            var url = $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(Require(s, "model", "model"))}:generateContent";
+            var message = Json(HttpMethod.Post, url, body);
+            message.Headers.Add("x-goog-api-key", Require(s, "key", "API key"));
+            var json = JObject.Parse(Encoding.UTF8.GetString(TtsHttp.Send(message, cancel)));
+            var data = (string)json.SelectToken("candidates[0].content.parts[0].inlineData.data");
+            if (string.IsNullOrEmpty(data))
+                throw new InvalidOperationException("no audio in the answer: " + TtsAudio.Snippet(Encoding.UTF8.GetBytes(json.ToString(Newtonsoft.Json.Formatting.None))));
+            // 16-bit PCM at 24 kHz, without a header.
+            var pcm = Convert.FromBase64String(data);
+            return TtsAudio.FromPcm16(pcm, 0, pcm.Length, 24000);
+        }
+
+        public override IReadOnlyList<TtsVoice> FetchVoices(TtsSettings settings, CancellationToken cancel) =>
+            voices.Select(v => new TtsVoice { Id = v, Name = v }).ToList();
+    }
+
     // NAVER CLOVA Voice (Premium): voices made for Korean.
     public class ClovaProvider : RemoteProvider
     {
         public override string Id => "clova";
         public override string Name => "NAVER CLOVA Voice";
+        public override string Note => Ko ? "유료" : "paid";
 
         public override IReadOnlyList<TtsField> Fields { get; } = new[]
         {
@@ -297,8 +370,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         public override TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel)
         {
             var s = request.Settings;
-            // CLOVA: -5 fastest to 5 slowest.
-            int speed = Math.Max(-5, Math.Min(5, -(int)Math.Round(request.Rate / 2.0)));
+            // CLOVA: -5 (twice as fast) to 5 (half as fast).
+            int speed = Math.Max(-5, Math.Min(5, -(int)Math.Round(5 * Math.Log(Clamp(request.Speed), 2))));
             var message = new HttpRequestMessage(HttpMethod.Post, Require(s, "url", "API address"))
             {
                 Content = new FormUrlEncodedContent(new Dictionary<string, string>
@@ -321,7 +394,8 @@ namespace RainbowMage.OverlayPlugin.Tts
     public class HttpTemplateProvider : RemoteProvider
     {
         public override string Id => "http";
-        public override string Name => T("Other service (HTTP request)", "다른 서비스 (HTTP 요청 직접 작성)");
+        public override string Name => T("HTTP request", "HTTP 요청 직접 작성");
+        public override string Note => T("any other service", "목록에 없는 서비스");
 
         private static string T(string en, string ko) => CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko" ? ko : en;
 
@@ -335,7 +409,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             Field("contentType", "Body type", "본문 형식", def: "application/json"),
             Field("response", "Answer", "응답", TtsFieldKind.Choice, "audio", choices: new[] { "audio", "json-base64" },
                 hint: "audio: the audio itself (WAV, MP3...); json-base64: base64 audio in a JSON field", hintKo: "audio: 음성 파일 그대로 (WAV, MP3 등), json-base64: JSON 안의 base64 음성"),
-            Field("jsonPath", "JSON field (json-base64)", "JSON 필드 (json-base64일 때)", def: "audioContent", hint: "e.g. audioContent, data.audio", hintKo: "예: audioContent, data.audio"),
+            Field("jsonPath", "JSON field (json-base64)", "JSON 필드 (json-base64일 때)", def: "audioContent", hint: "e.g. audioContent, data.audio, candidates.0.content", hintKo: "예: audioContent, data.audio, candidates.0.content"),
             Field("pcmRate", "Raw PCM rate (if it sends 16-bit PCM without a header)", "헤더 없는 16비트 PCM이면 샘플레이트", hint: "e.g. 24000; empty otherwise", hintKo: "예: 24000. 아니면 비우기"),
             Field("voice", "Voice", "목소리"),
             Field("key", "Key ({key})", "키 ({key})", TtsFieldKind.Secret),
@@ -355,8 +429,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                     ["text_xml"] = SecurityElement.Escape(request.Text),
                     ["text"] = url ? Uri.EscapeDataString(request.Text) : request.Text,
                     ["voice"] = url ? Uri.EscapeDataString(s["voice"]) : s["voice"],
-                    ["speed"] = request.Speed.ToString("0.##", CultureInfo.InvariantCulture),
-                    ["rate"] = request.Rate.ToString(CultureInfo.InvariantCulture),
+                    ["speed"] = Clamp(request.Speed).ToString("0.##", CultureInfo.InvariantCulture),
+                    ["rate"] = ((int)Math.Round(10 * Math.Log(Clamp(request.Speed), 2))).ToString(CultureInfo.InvariantCulture),
                     ["lang"] = request.Lang ?? "",
                     ["key"] = s["key"],
                 };
@@ -382,7 +456,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 JToken token = JToken.Parse(Encoding.UTF8.GetString(bytes));
                 foreach (var part in (s["jsonPath"] ?? "").Split(new[] { '.' }, StringSplitOptions.RemoveEmptyEntries))
-                    token = token?[part];
+                    token = token is JArray array && int.TryParse(part, out int i) ? (i < array.Count ? array[i] : null) : token?[part];
                 bytes = Convert.FromBase64String((string)token ?? "");
             }
             return TtsAudio.Decode(bytes, pcmRate);

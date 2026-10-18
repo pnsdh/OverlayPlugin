@@ -19,10 +19,12 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
         private static bool Ko => CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
 
         public string Id => "supertonic";
-        public string Name => Ko ? "Supertonic (이 PC에서, 무료, 내려받기 필요)" : "Supertonic (on this PC, free, download needed)";
+        public string Name => "Supertonic";
+        public string Note => Ko ? "무료, 이 PC, 내려받기 필요" : "free, on this PC, download needed";
         public bool IsSlow => true;
-        public const double MinSpeed = 0.9;
-        public const double MaxSpeed = 1.5;
+        // Its model speaks well only between 0.9 and 1.5 times its own speed (slower skips words).
+        public double MinSpeed => 0.9;
+        public double MaxSpeed => 1.5;
         // One text at a time: it runs on the CPU beside the game.
         public int Parallel => 1;
 
@@ -67,8 +69,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             try
             {
                 int.TryParse(request.Settings["steps"], out int steps);
-                // Its model speaks well only between 0.9 and 1.5 times its own speed (slower skips words).
-                var speed = (float)Math.Max(MinSpeed, Math.Min(MaxSpeed, 1.05 * request.Speed));
+                var speed = (float)Math.Max(MinSpeed, Math.Min(MaxSpeed, request.Speed));
                 var samples = loaded.Engine.Synthesize(request.Text, request.Lang ?? "ko", request.Settings["voice"], Math.Max(1, steps), speed);
                 return new TtsClip(samples, loaded.Engine.SampleRate);
             }

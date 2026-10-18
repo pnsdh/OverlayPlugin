@@ -17,6 +17,9 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         public string Id => ProviderId;
         public string Name => "Windows";
+        public string Note => System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko" ? "무료, 이 PC" : "free, on this PC";
+        public double MinSpeed => 0.5;
+        public double MaxSpeed => 2.0;
         public bool IsSlow => false;
         public int Parallel => 1;
         public IReadOnlyList<TtsField> Fields { get; } = new TtsField[0];
@@ -45,12 +48,14 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         public TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel) =>
-            Synthesize(request.Text, request.Voice, request.Rate);
+            Synthesize(request.Text, request.Voice, request.Speed);
 
         private readonly object sync = new object();
 
-        public TtsClip Synthesize(string text, TtsVoice voice, int rate)
+        // SAPI's rate is -10 (a third of the voice's speed) to 10 (three times).
+        public TtsClip Synthesize(string text, TtsVoice voice, double speed)
         {
+            int rate = (int)Math.Round(10 * Math.Log(Math.Max(MinSpeed, Math.Min(MaxSpeed, speed))) / Math.Log(3));
             lock (sync)
                 return SynthesizeLocked(text, voice, rate);
         }

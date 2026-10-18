@@ -9,7 +9,14 @@ namespace RainbowMage.OverlayPlugin.Tts
     public interface ITtsProvider
     {
         string Id { get; }
+        // Its name only (kept with made speech); what it is, beside it in the list (Note).
         string Name { get; }
+        string Note { get; }
+
+        // The speeds it can say (times its own), the chosen one held within; equal: no speed
+        // setting (e.g. Gemini, which takes the way to speak in words instead).
+        double MinSpeed { get; }
+        double MaxSpeed { get; }
 
         // Slow (over the network, or a heavy local model): speech is kept on disk, fetched
         // ahead, and Windows' voice says it when it is late.
@@ -53,9 +60,8 @@ namespace RainbowMage.OverlayPlugin.Tts
     {
         public string Text { get; set; }
         public TtsVoice Voice { get; set; }
-        // -10 to 10 (see TtsConfig.Rate); Speed is the same as a factor (0.5 to 2).
-        public int Rate { get; set; }
-        public double Speed => System.Math.Pow(2, Rate / 10.0);
+        // Times the voice's own speed (see TtsConfig.Speed), held within the provider's range.
+        public double Speed { get; set; } = 1.0;
         public string Lang { get; set; }
         public TtsSettings Settings { get; set; }
     }
