@@ -63,7 +63,8 @@ OverlayPlugin이 메모리에서 읽은 캐릭터(이름, 종류, 소유자, 몬
      - `NEW`: 알려 준 소스 파일을 고칩니다. OverlayPlugin은 기존 클래스를 고치지 말고 새 버전 클래스(예: `CombatantMemory80.cs`)를
        만들어 각 Manager의 후보에 등록하고 `PatchCheck/Signatures.cs` 표에도 넣습니다. cactbot은 `plugin/CactbotEventSource/FFXIVProcessKo.cs` 등
        지역 파일을 고칩니다.
-     - `FAIL`: 함수째 바뀐 것입니다. [PatchCheck 예행연습 기록](PatchCheck/README.md#예행연습-기록-2026-10-18)처럼 수동으로 찾거나 본가 대응을 기다립니다.
+     - `!` 줄이 붙은 `NEW`(읽던 변수를 쓰는 다른 함수들로 찾음, 또는 옛 패턴이 다른 변수를 읽음): 그대로 쓰되 4단계에서 게임 중 값으로 꼭 확인합니다.
+     - `FAIL`: 함수째 바뀌었고 대체 경로로도 못 찾은 것입니다. [PatchCheck 예행연습 기록](PatchCheck/README.md#예행연습-기록-2026-10-18)을 참고해 수동으로 찾거나 본가 대응을 기다립니다.
    - `WARN`(표가 모르는 스캔·새 버전 클래스)이면 표부터 맞춥니다.
 3. **빌드·설치**: OverlayPlugin은 `tools\build-install.ps1 -Version <설치본 4자리>`(ACT가 꺼져 있어야 함). cactbot 플러그인은
    `msbuild /p:Configuration=Release /p:Platform=x64 plugin/Cactbot.sln`(Visual Studio의 MSBuild, dotnet build는 위성 어셈블리 단계에서 실패).

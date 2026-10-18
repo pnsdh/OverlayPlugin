@@ -127,6 +127,10 @@ int Regen()
         string moved = (offsetMoved ? $" offset {s.Offset} -> {r.Offset}" : "") + (ripMoved ? $" ripOffset {s.RipOffset} -> {r.RipOffset}" : "");
         // Matches whose call targets could not be compared are said in the detail.
         string unchecked_ = r.CallTargetUnverified ? $"\n     ! call targets not compared: {r.Detail}" : "";
+        // The old pattern still matching but at code reading another variable (judged by the other
+        // functions using it), and patterns found by the variable instead of the same code.
+        string other = r.ReadsOtherGlobal ? "\n     ! the old pattern still matches but reads another variable (judged by the other functions using it)" : "";
+        string anchors = r.GlobalAnchors is int n ? $"\n     ! found by the variable it reads ({n} functions using it agree), not by the same code: check it in game" : "";
         if (r.AlreadyMatches && moved == "")
         {
             Console.WriteLine($"same {s.Name}  ({r.ReadField}){unchecked_}");
@@ -137,12 +141,12 @@ int Regen()
         }
         else if (r.Pattern != null)
         {
-            Console.WriteLine($"NEW  {s.Name}\n     {SigPattern.PeliteToHex(r.Pattern)} offset {r.Offset} ripOffset {r.RipOffset}{(ripMoved ? $"  (ripOffset was {s.RipOffset}: change the reader too)" : "")}  ({r.ReadField})\n     in {s.Source}{unchecked_}");
+            Console.WriteLine($"NEW  {s.Name}\n     {SigPattern.PeliteToHex(r.Pattern)} offset {r.Offset} ripOffset {r.RipOffset}{(ripMoved ? $"  (ripOffset was {s.RipOffset}: change the reader too)" : "")}  ({r.ReadField})\n     in {s.Source}{unchecked_}{other}{anchors}");
         }
         else
         {
             failed++;
-            Console.WriteLine($"FAIL {s.Name}: {r.Detail}");
+            Console.WriteLine($"FAIL {s.Name}: {r.Detail}{other}");
         }
     }
     return failed > 0 ? 2 : 0;
