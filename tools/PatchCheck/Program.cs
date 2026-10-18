@@ -16,8 +16,10 @@ using PatchCheck;
 //   64KB blocks the plugins read in.  Judged are the ones in use: the newest version class of each
 //   OverlayPlugin reader, and cactbot's file for the exe's region; older ones are shown for
 //   reference.  Default exe: the Korean client's.
-// PatchCheck regen --old <exe> --new <exe> [--region ...]
+// PatchCheck regen --old <exe> --new <exe> [--region ...] [--only <name part>,...]
 //   Makes the signatures in use again for a new exe from the old one (FFXIV.Signatures' SigRegen).
+//   --only picks signatures by name instead, older version classes too (to rehearse a past patch
+//   with the signatures that were in use before it, e.g. --only EnmityHudMemory70).
 // Common: --cactbot <dir> (default ..\cactbot next to this repo).
 string repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 if (!File.Exists(Path.Combine(repo, "OverlayPlugin.sln")))
@@ -52,7 +54,7 @@ catch (SignatureException e)
 
 int Usage()
 {
-    Console.Error.WriteLine("usage: PatchCheck list [--json <file>] | scan [--exe <exe>] [--region <r>] | regen --old <exe> --new <exe>");
+    Console.Error.WriteLine("usage: PatchCheck list [--json <file>] | scan [--exe <exe>] [--region <r>] | regen --old <exe> --new <exe> [--only <names>]");
     return 1;
 }
 
@@ -113,7 +115,9 @@ int Regen()
     var oldCode = new CodeImage(oldExe);
     var newCode = new CodeImage(newExe);
     int failed = 0;
-    foreach (var s in signatures.Where(s => InUse(s, region)))
+    var only = opts.GetValueOrDefault("only")?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var picked = only != null ? signatures.Where(s => only.Any(o => s.Name.Contains(o, StringComparison.OrdinalIgnoreCase))) : signatures.Where(s => InUse(s, region));
+    foreach (var s in picked)
     {
         var r = SigRegen.Regenerate(oldCode, newCode, SigPattern.HexToPelite(s.Pattern), s.Offset);
         // The pattern can still match while the value is read from elsewhere: a moved field (offset),
