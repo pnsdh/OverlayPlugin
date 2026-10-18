@@ -61,7 +61,12 @@ namespace RainbowMage.OverlayPlugin.EventSources
                 // Fork: what this plugin's TTS takes besides text (asked once by cactbot: other
                 // OverlayPlugins answer nothing, as the text is missing).
                 if (msg["query"]?.ToString() == "capabilities")
+                {
+                    // Fork: with it cactbot says how its alerts are output by default.
+                    if (msg["output"] != null && container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.TtsService asked))
+                        asked.CactbotOutput = msg["output"].ToString();
                     return OwnTts(out _) ? new JObject { ["engine"] = "overlayplugin", ["prepare"] = true } : null;
+                }
 
                 // Fork: the volume of all speech, shown (and set, with volume: 0 to 100) in
                 // cactbot's config; whether this plugin reads alerts now (enabled).

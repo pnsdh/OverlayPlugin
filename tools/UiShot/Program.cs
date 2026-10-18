@@ -30,7 +30,7 @@ static class Program
     {
         string outDir = args.Length > 0 ? args[0] : "out";
         bool sample = outDir == "techsupport";
-        string culture = args.Length > 1 && !sample ? args[1] : "ko-KR";
+        string culture = args.Length > 1 && !sample && outDir != "config" ? args[1] : "ko-KR";
         int width = args.Length > 2 ? int.Parse(args[2]) : 820;
         int height = args.Length > 3 ? int.Parse(args[3]) : 560;
         libs = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, @"..\..\..\..\out\Release\libs"));
@@ -63,6 +63,8 @@ static class Program
         AppContext.SetSwitch("System.Resources.ResourceManager.AllowCustomResourceTypes", true);
         if (outDir == "censor")
             return CensorCheck();
+        if (outDir == "config")
+            return ConfigCheck(args[1]);
         if (sample)
             return TechSupportSample(args.Length > 1 ? int.Parse(args[1]) : 5);
         Directory.CreateDirectory(outDir);
@@ -70,6 +72,30 @@ static class Program
         if (Environment.GetEnvironmentVariable("UISHOT_NO_WEBVIEW2") == null)
             SimulateWebView2();
         return Run(outDir, culture, width, height);
+    }
+
+    // A config as ACT loads it (overlays included), saved and loaded again: what came of the
+    // renderer settings and the server's address (e.g. the one-time move to WebView2).
+    // UiShot.exe config <a copy of RainbowMage.OverlayPlugin.config.json>  (the copy is rewritten)
+    static int ConfigCheck(string path)
+    {
+        var container = new TinyIoCContainer();
+        container.Register<ILogger>(new Logger());
+        var main = Stub<PluginMain>();
+        SetProperty(main, "PluginDirectory", libs);
+        container.Register(main);
+        string Describe(PluginConfig c) =>
+            $"WebView2Moved={c.WebView2Moved} panels={c.PanelsUseWebView2} gpu={c.UseGpu} cutscene={c.HideOverlayDuringCutscene} ws={c.WSServerIP}:{c.WSServerPort} overlays=[" +
+            string.Join(", ", c.Overlays.Select(o => $"{o.Name}:{((o as OverlayConfigBase)?.UseWebView2 == true ? "wv2" : "cef")}/{o.MaxFrameRate}fps")) + "]";
+        var first = new PluginConfig(path, container);
+        Console.WriteLine("loaded:  " + Describe(first));
+        // One switched back to CEF after the move: kept.
+        if (first.Overlays.FirstOrDefault() is OverlayConfigBase back)
+            back.UseWebView2 = false;
+        first.SaveJson(true);
+        var second = new PluginConfig(path, container);
+        Console.WriteLine("again:   " + Describe(second));
+        return 0;
     }
 
     static int Run(string outDir, string culture, int width, int height)
@@ -133,6 +159,17 @@ static class Program
             if (!container.CanResolve<RainbowMage.OverlayPlugin.Tts.TtsService>())
                 container.Register(new RainbowMage.OverlayPlugin.Tts.TtsService(container, config.Tts));
             return new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
+        });
+        Shoot("TtsConfigPanel-cactbot-off", () =>
+        {
+            // TTS on, but cactbot outputs its alerts as text and sound (the warning under the switch).
+            var service = container.Resolve<RainbowMage.OverlayPlugin.Tts.TtsService>();
+            service.CactbotOutput = "textAndSound";
+            config.Tts.Enabled = true;
+            var panel = new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
+            config.Tts.Enabled = false;
+            service.CactbotOutput = null;
+            return panel;
         });
         Shoot("TtsConfigPanel-network", () =>
         {

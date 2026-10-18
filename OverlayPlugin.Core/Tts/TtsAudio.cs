@@ -92,7 +92,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         // For tools/TtsBench (set by reflection): answers requests instead of the network, to see
         // what each service is sent.
-        internal static Func<HttpRequestMessage, byte[]> Intercept;
+        internal static Func<HttpRequestMessage, byte[]> Intercept = null;
 
         // The answer's bytes; a failure as an exception with the service's own message.
         public static byte[] Send(HttpRequestMessage request, System.Threading.CancellationToken cancel)
@@ -118,7 +118,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                 {
                     var retry = response.Headers.RetryAfter;
                     TimeSpan? after = retry?.Delta ?? (retry?.Date != null ? retry.Date.Value - DateTimeOffset.UtcNow : (TimeSpan?)null);
-                    throw new TtsHttpException((int)response.StatusCode, after, $"{(int)response.StatusCode} {response.ReasonPhrase}: {TtsAudio.Snippet(bytes)}");
+                    var body = Encoding.UTF8.GetString(bytes, 0, Math.Min(bytes.Length, 8192));
+                    throw new TtsHttpException((int)response.StatusCode, after, $"{(int)response.StatusCode} {response.ReasonPhrase}: {TtsAudio.Snippet(bytes)}", body);
                 }
                 return bytes;
             }
@@ -130,11 +131,14 @@ namespace RainbowMage.OverlayPlugin.Tts
     {
         public int Status { get; }
         public TimeSpan? RetryAfter { get; }
+        // The answer (up to 8 KB; the message has only its start, for the log).
+        public string Body { get; }
 
-        public TtsHttpException(int status, TimeSpan? retryAfter, string message) : base(message)
+        public TtsHttpException(int status, TimeSpan? retryAfter, string message, string body = "") : base(message)
         {
             Status = status;
             RetryAfter = retryAfter;
+            Body = body ?? "";
         }
     }
 }

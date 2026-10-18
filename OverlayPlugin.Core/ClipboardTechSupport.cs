@@ -162,7 +162,8 @@ namespace RainbowMage.OverlayPlugin
                     flags.Add("off");
                 else if (!overlay.IsVisible)
                     flags.Add("hidden");
-                if (config != null && config.UseWebView2)
+                // What draws it (the setting, unless the runtime can't be used).
+                if (config != null && config.UseWebView2 && HtmlRenderer.Renderer.WebView2Available)
                     flags.Add("WebView2");
                 else
                     flags.Add(config != null && config.MatchRefreshRate ? "CEF monitor-rate" : $"CEF {overlay.MaxFrameRate}fps");
@@ -260,7 +261,7 @@ namespace RainbowMage.OverlayPlugin
             string webView2 = HtmlRenderer.Renderer.WebView2Available
                 ? HtmlRenderer.Renderer.WebView2Status
                 : $"n/a ({HtmlRenderer.Renderer.WebView2Status})";
-            var renderer = $"GPU {OnOff(full != null && full.UseGpu)}, panels {(full != null && full.PanelsUseWebView2 ? "WebView2" : "CEF")}" +
+            var renderer = $"GPU {OnOff(full != null && full.UseGpu)}, panels {(HtmlRenderer.Renderer.PanelsUseWebView2 ? "WebView2" : "CEF")}" +
                 $" | CEF {CefVersion()} | WebView2 {webView2} | update check {OnOff(full != null && full.UpdateCheck)}";
             fork.Insert(0, renderer);
             var switches = new[] { "op-probe.enable", "op-selfcheck.enable" }

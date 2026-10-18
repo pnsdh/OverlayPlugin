@@ -58,7 +58,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         public Dictionary<string, TtsUsage> Usage { get; set; } = new Dictionary<string, TtsUsage>();
 
         // Speech from the network kept on disk (megabytes), so an alert is fetched once.
-        public int DiskCacheMB { get; set; } = 300;
+        public int DiskCacheMB { get; set; } = 1000;
 
         // An output device's ID (Windows' audio endpoint); empty: the default one.
         public string OutputDevice { get; set; } = "";

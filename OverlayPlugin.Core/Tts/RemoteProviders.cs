@@ -304,7 +304,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         public override IReadOnlyList<TtsField> Fields { get; } = new[]
         {
             Field("key", "API key", "API 키", TtsFieldKind.Secret, hint: "elevenlabs.io > Developers > API Keys", hintKo: "elevenlabs.io > Developers > API Keys"),
-            Field("voice", "Voice ID", "목소리 ID", hint: "Fetch the list, or paste a voice's ID", hintKo: "목록을 불러오거나 목소리 ID 붙여 넣기"),
+            // Adam: a default voice, which the free plan can use too.
+            Field("voice", "Voice ID", "목소리 ID", def: "pNInz6obpgDQGcFmaJgB", hint: "Fetch the list, or paste a voice's ID", hintKo: "목록을 불러오거나 목소리 ID 붙여 넣기"),
             Field("model", "Model", "모델", def: "eleven_flash_v2_5"),
             Field("direction", "Acting direction before each alert (v3, v4 models)", "알림마다 앞에 붙일 연기 지시 (v3, v4 모델만)",
                 hint: "e.g. [excited], [shouts], [whispers], [said calmly]; not sent to other models (they would read it out)",

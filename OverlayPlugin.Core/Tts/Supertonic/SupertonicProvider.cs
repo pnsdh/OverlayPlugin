@@ -35,8 +35,8 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                 Hint = "F: female, M: male", HintKo = "F: 여성, M: 남성" },
             new TtsField { Key = "steps", Label = "Quality (steps)", LabelKo = "품질 (단계 수)", Kind = TtsFieldKind.Choice, Default = "5", Choices = new[] { "3", "5", "8", "12" },
                 ChoiceNames = new[] { "3", "5 (default)", "8", "12" }, ChoiceNamesKo = new[] { "3", "5 (기본)", "8", "12" },
-                Hint = "More: better, slower. 5 is enough near the normal speed; further from it words can break, so below 0.9x or above 1.1x it is made with 8 or more.",
-                HintKo = "많을수록 좋지만 느립니다. 기본 속도 근처에서는 5로 충분하고, 속도를 많이 바꾸면 낱말이 깨질 수 있어서 0.9배보다 느리거나 1.1배보다 빠르면 8 이상으로 만듭니다." },
+                Hint = "More: better, slower. 5 is enough near the normal speed; further from it words can break, so slowed down (0.9x) or faster than 1.1x it is made with 8 or more.",
+                HintKo = "많을수록 좋지만 느립니다. 기본 속도 근처에서는 5로 충분하고, 속도를 많이 바꾸면 낱말이 깨질 수 있어서 느리게(0.9배) 하거나 1.1배보다 빠르게 하면 8 이상으로 만듭니다." },
             // Only how fast: the speech is the same, so made speech is kept when it changes.
             new TtsField { Key = "threads", Label = "CPU threads", LabelKo = "CPU 스레드", Kind = TtsFieldKind.Choice, Default = "2", Choices = ThreadChoices(),
                 ChoiceNames = ThreadChoices().Select(c => c == "2" ? "2 (default)" : c).ToArray(),
@@ -76,14 +76,13 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
 
         public TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel)
         {
-            int.TryParse(request.Settings["threads"], out int threads);
-            var loaded = Lease(Math.Max(1, Math.Min(Math.Min(threads, 4), Environment.ProcessorCount)));
+            var loaded = Lease(Threads(request.Settings));
             try
             {
                 int.TryParse(request.Settings["steps"], out int steps);
                 var speed = (float)Math.Max(MinSpeed, Math.Min(MaxSpeed, request.Speed));
-                // Few steps break words away from the normal speed (heard at 0.9x with 5).
-                if (Math.Abs(speed - 1f) > 0.1f)
+                // Few steps break words away from the normal speed (heard at 0.9x, the slowest, with 5).
+                if (speed < 0.95f || speed > 1.1f)
                     steps = Math.Max(steps, 8);
                 var samples = loaded.Engine.Synthesize(request.Text, request.Lang ?? "ko", request.Settings["voice"], Math.Max(1, steps), speed);
                 return new TtsClip(samples, loaded.Engine.SampleRate);
@@ -183,18 +182,26 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
         }
 
         // Wanted (chosen, TTS on): loaded ahead (a few seconds), so the first alert does not wait.
+        // The threads asked for, held to 4 and the computer's cores (warmed and used alike, so the
+        // engine is not loaded again on the first alert).
+        private static int Threads(TtsSettings settings)
+        {
+            int.TryParse(settings["threads"], out int threads);
+            return Math.Max(1, Math.Min(Math.Min(threads <= 0 ? 2 : threads, 4), Environment.ProcessorCount));
+        }
+
         public void Warm(TtsSettings settings)
         {
             lock (sync)
                 wanted = true;
             if (!SupertonicModel.Ready)
                 return;
-            int.TryParse(settings["threads"], out int threads);
+            int threads = Threads(settings);
             Task.Run(() =>
             {
                 try
                 {
-                    Release(Lease(Math.Max(1, threads)));
+                    Release(Lease(threads));
                 }
                 catch (Exception)
                 {

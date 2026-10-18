@@ -77,7 +77,9 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             if (!Billed(provider))
                 return false;
-            if (provider is OpenAiCompatibleProvider && Uri.TryCreate(settings["url"], UriKind.Absolute, out var url))
+            // Its placeholders ({voice}...) taken out, for a hand-written request's address.
+            var address = System.Text.RegularExpressions.Regex.Replace(settings["url"], "\\{[^}]*\\}", "x");
+            if ((provider is OpenAiCompatibleProvider || provider.Id == "http") && Uri.TryCreate(address, UriKind.Absolute, out var url))
                 return !url.IsLoopback;
             return true;
         }

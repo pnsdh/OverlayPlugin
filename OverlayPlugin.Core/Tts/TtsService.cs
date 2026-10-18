@@ -64,6 +64,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         // For the settings' preview: how the last speech went.
         public event Action<TtsResult> Spoken;
 
+        // cactbot's default alert output (e.g. textAndSound), told when it asks what this TTS
+        // takes: with no TTS in it, none of its alerts are read (the settings say so).
+        public string CactbotOutput { get; set; }
+
         // How the chosen slow voice did since ACT started (see TtsStats).
         public TtsStats Stats { get; } = new TtsStats();
 
@@ -246,6 +250,15 @@ namespace RainbowMage.OverlayPlugin.Tts
             // A zone being fetched ahead with the old settings (another voice, key...) is not
             // wanted any more.
             preparing?.Cancel();
+            // Nor a pause from the old ones (a key out of quota, replaced).
+            bool wasPaused;
+            lock (paused)
+            {
+                wasPaused = paused.Count > 0;
+                paused.Clear();
+            }
+            if (wasPaused)
+                PausedChanged?.Invoke();
             LoadOrUnload();
         }
 
@@ -643,15 +656,18 @@ namespace RainbowMage.OverlayPlugin.Tts
             var pause = PausedFor(provider);
             if (pause != null)
             {
-                LogError(PausedText(provider, pause.Value));
+                PrepareNote = PausedText(provider, pause.Value);
+                LogError(PrepareNote);
+                PrepareProgress = (0, 0);
+                Prepared?.Invoke(0, 0);
                 return;
             }
             // A paid service only with a monthly limit: a zone is hundreds of texts.
             if (TtsUsageCounter.Paid(provider, Settings) && Usage.Get(provider).MonthlyLimit <= 0)
             {
                 PrepareNote = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
-                    ? "유료 서비스는 월 한도를 정해야 미리 만듭니다 (만든 음성·사용량 탭)"
-                    : "A paid service makes ahead only with a monthly limit (Made speech and usage)";
+                    ? "유료 서비스는 월 한도를 정해야 미리 만듭니다 (사용량 탭)"
+                    : "A paid service makes ahead only with a monthly limit (Usage tab)";
                 PrepareProgress = (0, 0);
                 Prepared?.Invoke(0, 0);
                 return;
@@ -760,7 +776,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 request.FromCache = true;
                 if (plan.Provider.IsSlow)
-                    disk.Touch(plan.Key, CurrentZone);
+                    TouchLater(plan.Key);
                 return kept;
             }
             if (!plan.Provider.IsSlow)
@@ -771,7 +787,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (kept != null)
             {
                 request.FromCache = true;
-                disk.Touch(plan.Key, CurrentZone);
+                TouchLater(plan.Key);
                 Usage.Kept(plan.Provider);
                 return Keep(plan.Key, kept, null);
             }
@@ -898,6 +914,15 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         // The same failure (no network, a bad key) logged once a minute, not for every alert.
+        // The zone an alert was said in, recorded for its made speech off the alert's way (the
+        // disk index's lock can be held for a while by a delete or trim).
+        private void TouchLater(string key)
+        {
+            var zone = CurrentZone;
+            if (zone != null)
+                ThreadPool.QueueUserWorkItem(_ => disk.Touch(key, zone));
+        }
+
         // An alert (not the preview) waiting to be made, being made, or being fetched.
         private bool LiveWaiting()
         {
@@ -952,7 +977,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (!(e.GetBaseException() is TtsHttpException http))
                 return false;
             bool ko = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
-            var message = http.Message.ToLowerInvariant();
+            var message = (http.Message + " " + http.Body).ToLowerInvariant();
+            // Too many at once (fetching ahead in flight) or busy for a moment: that request alone
+            // falls back, the service is not left alone for a minute.
+            if (http.Status == 429 && (message.Contains("concurrent") || message.Contains("system_busy")))
+                return false;
             bool outOfQuota = http.Status == 402 || message.Contains("insufficient_quota") || message.Contains("quota_exceeded") ||
                 ((http.Status == 401 || http.Status == 403) && message.Contains("quota"));
             TimeSpan wait;
@@ -965,7 +994,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             else if (http.Status == 429)
             {
                 // Gemini says when in its answer ("retryDelay": "41s").
-                var said = System.Text.RegularExpressions.Regex.Match(http.Message, "\"retryDelay\"\\s*:\\s*\"(\\d+)(?:\\.\\d+)?s\"");
+                var said = System.Text.RegularExpressions.Regex.Match(http.Body, "\"retryDelay\"\\s*:\\s*\"(\\d+)(?:\\.\\d+)?s\"");
                 wait = http.RetryAfter ?? (said.Success ? TimeSpan.FromSeconds(int.Parse(said.Groups[1].Value)) : TimeSpan.FromMinutes(1));
                 wait = TimeSpan.FromSeconds(Math.Max(10, Math.Min(6 * 3600, wait.TotalSeconds)));
                 reason = ko ? "요청이 너무 많음 (한도 초과)" : "too many requests (over the limit)";

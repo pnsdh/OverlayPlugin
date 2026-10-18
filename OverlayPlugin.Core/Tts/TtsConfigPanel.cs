@@ -19,6 +19,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly ActTtsBridge bridge;
         private readonly IPluginConfig pluginConfig;
         private TrackBar masterBar;
+        private Label cactbotNote;
         private Label statsLabel;
         private Label paidNote;
         private readonly TtsConfig config;
@@ -33,8 +34,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         private Label prepared;
         private FlowLayoutPanel usagePanel;
         private readonly WheelGuard wheelGuard;
-        private Control slowSection;
-        private Control slowHeader;
+        // Tabs shown only for some engines: slow ones (fallback, making ahead), paid ones (usage).
+        private TabPage slowPage;
+        private TabPage usagePage;
+        private readonly List<TabPage> allPages = new List<TabPage>();
         private CheckBox localPrepare;
         private Label localPrepareHint;
         private Label speedHint;
@@ -67,7 +70,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             ownerTimer.Tick += (o, e) =>
             {
                 ShowOwner();
-                if (tabs?.SelectedTab == madePage)
+                if (tabs?.SelectedTab == slowPage)
                     ShowStats();
             };
             VisibleChanged += (o, e) =>
@@ -103,7 +106,17 @@ namespace RainbowMage.OverlayPlugin.Tts
             var basic = Page(T("Voice", "기본"));
             var general = Section(basic, T("Text to speech", "TTS"));
             general.Controls.Add(Check(T("Read alerts with this plugin's TTS (off: ACT's own TTS, as before)", "알림을 이 플러그인의 TTS로 읽기 (끄면 지금까지처럼 ACT의 TTS)"),
-                config.Enabled, v => { config.Enabled = v; ApplyBridge(); Changed(); }));
+                config.Enabled, v => { config.Enabled = v; ApplyBridge(); Changed(); ShowCactbotNote(); }));
+            cactbotNote = new Label
+            {
+                AutoSize = true,
+                MaximumSize = new Size(700, 0),
+                ForeColor = Color.FromArgb(190, 70, 0),
+                Font = new Font(Font, FontStyle.Bold),
+                Margin = new Padding(20, 0, 3, 6),
+                Visible = false,
+            };
+            general.Controls.Add(cactbotNote);
             general.Controls.Add(Check(T("Also read what ACT itself speaks (its custom triggers, other plugins)", "ACT가 읽는 것(커스텀 트리거, 다른 플러그인)도 이 플러그인으로 읽기"),
                 config.TakeOverActTts, v => { config.TakeOverActTts = v; ApplyBridge(); }));
             general.Controls.Add(Check(T("When another plugin speaks for ACT (e.g. TTSYukkuri), send overlays' alerts to it too", "다른 플러그인(TTSYukkuri 등)이 ACT의 TTS를 맡고 있으면 오버레이 알림도 그쪽으로 보내기"),
@@ -157,8 +170,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
             var reset = Section(basic, T("Settings", "설정"));
             reset.Controls.Add(Button(T("Reset settings to defaults...", "설정을 기본값으로..."), ResetToDefaults));
-            reset.Controls.Add(Hint(T("Engines' voices and quality go back too; API keys, addresses and regions, downloaded models, usage counts, made speech and your own rules are kept.",
-                "엔진별 목소리·품질도 돌아가고, API 키·주소·지역, 다운로드한 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다.")));
+            reset.Controls.Add(Hint(T(KeptOnReset, KeptOnResetKo)));
 
             // When alerts come together.
             var alerts = Page(T("Alerts", "알림 처리"));
@@ -185,13 +197,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             text.Controls.Add(rules);
             text.Controls.Add(Button(T("Restore built-in rules", "기본 규칙 되돌리기"), RestoreBuiltIns));
 
-            // Made speech and usage.
-            var made = Page(T("Made speech", "만든 음성·사용량"));
-            madePage = (TabPage)made.Parent;
-            var network = Section(made, T("Fallback and making ahead", "대신 읽기와 미리 만들기"));
-            // Shown only for such a voice (see ShowProviderFields).
-            slowSection = network;
-            slowHeader = made.Controls[made.Controls.Count - 2];
+            // Engines that take time: falling back, making ahead, how it went (shown for them only,
+            // see ShowProviderFields).
+            var slow = Page(T("Fallback, ahead", "대신 읽기·미리 만들기"));
+            slowPage = (TabPage)slow.Parent;
+            var network = Section(slow, T("Fallback and making ahead", "대신 읽기와 미리 만들기"));
             network.Controls.Add(Hint(T("For engines that take time to make speech (services on the internet, Supertonic).",
                 "음성을 만드는 데 시간이 걸리는 엔진(인터넷 서비스, Supertonic)에 적용됩니다.")));
             var networkGrid = Grid(network);
@@ -199,8 +209,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             network.Controls.Add(Hint(T("Not for the preview below, which waits for the voice itself.", "아래 미리 듣기에는 쓰지 않습니다 (그 목소리 자체를 기다림).")));
             network.Controls.Add(Check(T("Make ahead the alerts cactbot sends on entering a zone (so the first time is quick too; a paid service charges each once)",
                 "캑봇이 지역에 들어갈 때 보내 주는 알림 문장을 미리 만들어 두기 (처음 나오는 알림도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => { config.PrepareAhead = v; if (!v) service.CancelPrepare(); }));
-            network.Controls.Add(Hint(T("A paid service makes all of a zone's alerts the first time (often hundreds of texts, thousands of characters). Made once, kept for good; but a small free allowance (ElevenLabs' free plan: 10,000 characters a month; Gemini's free tier: requests a day) can be gone in a few zones. So a paid service makes ahead only once a monthly limit is set (Made speech and usage). When a service says it is over its limit, it is left alone for a while and Windows' voice reads.",
-                "유료 서비스는 지역에 처음 들어갈 때 그 지역 알림 전부(보통 수백 문장, 수천 자)를 만듭니다. 한 번 만든 음성은 계속 쓰지만, 무료 사용량이 적은 서비스(ElevenLabs 무료 플랜 월 1만 자, Gemini 무료 등급의 하루 요청 수)는 몇 지역 만에 다 쓸 수 있습니다. 그래서 유료 서비스는 월 한도를 정해야 미리 만듭니다 (만든 음성·사용량 탭). 서비스가 한도를 넘었다고 답하면 한동안 보내지 않고 Windows 음성으로 읽습니다.")));
+            network.Controls.Add(Hint(T("A paid service makes all of a zone's alerts the first time (often hundreds of texts, thousands of characters). Made once, kept for good; but a small free allowance (ElevenLabs' free plan: 10,000 characters a month; Gemini's free tier: requests a day) can be gone in a few zones. So a paid service makes ahead only once a monthly limit is set (Usage tab). When a service says it is over its limit, it is left alone for a while and Windows' voice reads.",
+                "유료 서비스는 지역에 처음 들어갈 때 그 지역 알림 전부(보통 수백 문장, 수천 자)를 만듭니다. 한 번 만든 음성은 계속 쓰지만, 무료 사용량이 적은 서비스(ElevenLabs 무료 플랜 월 1만 자, Gemini 무료 등급의 하루 요청 수)는 몇 지역 만에 다 쓸 수 있습니다. 그래서 유료 서비스는 월 한도를 정해야 미리 만듭니다 (사용량 탭). 서비스가 한도를 넘었다고 답하면 한동안 보내지 않고 Windows 음성으로 읽습니다.")));
             localPrepare = Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
                 "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); });
             network.Controls.Add(localPrepare);
@@ -210,34 +220,33 @@ namespace RainbowMage.OverlayPlugin.Tts
             prepared = Hint("");
             network.Controls.Add(prepared);
             // How it did this session: whether making ahead is needed.
-            network.Controls.Add(new Label
-            {
-                Text = T("This session", "이번 접속 통계"),
-                AutoSize = true,
-                Font = new Font(Font, FontStyle.Bold),
-                Margin = new Padding(3, 10, 3, 3),
-            });
+            var stats = Section(slow, T("This session", "이번 접속 통계"));
             statsLabel = new Label { AutoSize = true, MaximumSize = new Size(700, 0), Margin = new Padding(3, 0, 3, 3) };
-            network.Controls.Add(statsLabel);
-            network.Controls.Add(Hint(T("Made speech: made before (ahead, or heard before). Made in time: within the fallback time. To see whether making ahead is needed, play with it off and look here.",
+            stats.Controls.Add(statsLabel);
+            stats.Controls.Add(Hint(T("Made speech: made before (ahead, or heard before). Made in time: within the fallback time. To see whether making ahead is needed, play with it off and look here.",
                 "만들어 둔 음성: 미리 만들었거나 전에 한 번 읽어서 저장된 것. 제시간: 대신 읽기 기준 시간 안에 만든 것. 미리 만들기가 필요한지 보려면 끄고 한 판 돌아 본 뒤 여기를 보세요.")));
-            network.Controls.Add(Button(T("Reset the stats", "통계 초기화"), () =>
+            stats.Controls.Add(Button(T("Reset the stats", "통계 초기화"), () =>
             {
                 service.Stats.Reset();
                 ShowStats();
             }));
-            // A paid voice's usage (made again with the provider's fields).
-            usagePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
-            network.Controls.Add(usagePanel);
 
+            // A paid voice's usage (made again with the provider's fields; shown for it only).
+            var usage = Page(T("Usage", "사용량"));
+            usagePage = (TabPage)usage.Parent;
+            usagePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
+            usage.Controls.Add(usagePanel);
+
+            // Made speech kept on disk.
+            var made = Page(T("Made speech", "만든 음성"));
+            madePage = (TabPage)made.Parent;
             MadeSection(made);
             tabs.SelectedIndexChanged += (o, e) =>
             {
                 if (tabs.SelectedTab == madePage)
-                {
                     RefreshMade();
+                if (tabs.SelectedTab == slowPage)
                     ShowStats();
-                }
             };
 
             ShowOwner();
@@ -326,7 +335,29 @@ namespace RainbowMage.OverlayPlugin.Tts
             };
             page.Controls.Add(root);
             tabs.TabPages.Add(page);
+            allPages.Add(page);
             return root;
+        }
+
+        // A tab put back in its place among the others, or taken out.
+        private void ShowTab(TabPage page, bool shown)
+        {
+            if (page == null || tabs.TabPages.Contains(page) == shown)
+                return;
+            if (!shown)
+            {
+                tabs.TabPages.Remove(page);
+                return;
+            }
+            int index = 0;
+            foreach (var other in allPages)
+            {
+                if (other == page)
+                    break;
+                if (tabs.TabPages.Contains(other))
+                    index++;
+            }
+            tabs.TabPages.Insert(index, page);
         }
 
         // Try it: below every page, so a change can be heard from where it is made.
@@ -382,13 +413,16 @@ namespace RainbowMage.OverlayPlugin.Tts
             return strip;
         }
 
+        // What the reset leaves (the same in its button's hint and its question).
+        private const string KeptOnReset = "Engines' voices and quality go back too. Kept: whether TTS is on, API keys and IDs, addresses and regions, a hand-written HTTP request, downloaded models, usage counts, made speech and your own rules.";
+        private const string KeptOnResetKo = "엔진별 목소리·품질도 돌아갑니다. 그대로 두는 것: TTS 켜짐 여부, API 키·ID, 주소·지역, 직접 작성한 HTTP 요청, 다운로드한 모델, 사용량, 만든 음성, 직접 추가한 규칙.";
+
         // Every setting back to its default, but what the user brought or made: keys, downloaded
         // models, usage counts, made speech, their own rules (and whether TTS is on).
         private void ResetToDefaults()
         {
             if (MessageBox.Show(this,
-                T("Reset the TTS settings to their defaults, engines' voices and quality included? API keys, addresses and regions, a hand-written HTTP request, downloaded models, usage counts, made speech and your own rules are kept.",
-                  "TTS 설정을 기본값으로 되돌릴까요? 엔진별 목소리·품질 같은 설정도 돌아갑니다. API 키·주소·지역, 직접 작성한 HTTP 요청, 다운로드한 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다."),
+                T("Reset the TTS settings to their defaults? " + KeptOnReset, "TTS 설정을 기본값으로 되돌릴까요? " + KeptOnResetKo),
                 "TTS", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
             var d = new TtsConfig();
@@ -570,13 +604,13 @@ namespace RainbowMage.OverlayPlugin.Tts
                   "- What it reads is billed to your own account, by the character.\n" +
                   "- Making ahead makes all of a zone's alerts the first time you enter it: often hundreds of texts, thousands of characters. With cactbot's \"make ahead alerts naming a player too\", more.\n" +
                   "- Free allowances differ and can be small (ElevenLabs' free plan: 10,000 characters a month).\n" +
-                  "- Nothing is made ahead until you set a monthly limit (Made speech and usage). At the limit, Windows' voice reads for the rest of the month.\n\n" +
+                  "- Nothing is made ahead until you set a monthly limit (Usage tab). At the limit, Windows' voice reads for the rest of the month.\n\n" +
                   "Use this engine?",
                   $"{provider.Name}은(는) 유료 서비스입니다.\n\n" +
                   "· 읽은 글자 수만큼 본인 계정에 요금이 청구됩니다.\n" +
                   "· 미리 만들기는 지역에 처음 들어갈 때 그 지역 알림 전부(보통 수백 문장, 수천 자)를 만듭니다. 캑봇의 \"플레이어가 들어간 알림도 미리 만들기\"를 켜면 더 늘어납니다.\n" +
                   "· 무료 사용량은 서비스마다 다르고 작을 수 있습니다 (ElevenLabs 무료 플랜은 월 1만 자).\n" +
-                  "· 월 한도를 정하기 전에는 미리 만들기를 하지 않습니다 (만든 음성·사용량 탭). 한도에 닿으면 그 달 남은 기간은 Windows 음성으로 읽습니다.\n\n" +
+                  "· 월 한도를 정하기 전에는 미리 만들기를 하지 않습니다 (사용량 탭). 한도에 닿으면 그 달 남은 기간은 Windows 음성으로 읽습니다.\n\n" +
                   "이 엔진을 쓸까요?"),
                 "TTS", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) == DialogResult.OK;
         }
@@ -628,13 +662,12 @@ namespace RainbowMage.OverlayPlugin.Tts
                     "본인 키를 씁니다. 키는 이 Windows 사용자만 풀 수 있게 암호화해 저장합니다.")));
             }
             providerFields.ResumeLayout();
-            // Fallback, disk, fetching ahead and usage are only for a slow voice (network,
-            // Supertonic); the Supertonic option only for it.
-            if (slowSection != null)
-            {
-                slowSection.Visible = slowHeader.Visible = provider.IsSlow;
+            // Falling back and making ahead are only for a slow voice (network, Supertonic), usage
+            // only for a paid one; the Supertonic option only for it.
+            ShowTab(slowPage, provider.IsSlow);
+            ShowTab(usagePage, TtsUsageCounter.Billed(provider));
+            if (localPrepare != null)
                 localPrepare.Visible = localPrepareHint.Visible = provider is ITtsDownloadable;
-            }
             UpdateSpeed();
             ShowUsage();
             loading = wasLoading;
@@ -732,7 +765,10 @@ namespace RainbowMage.OverlayPlugin.Tts
             };
             var limitRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             limitRow.Controls.Add(limit);
-            limitRow.Controls.Add(Hint(T("characters; past it Windows' voice reads until next month. 0: no limit (a paid service then makes nothing ahead)", "자. 넘으면 다음 달까지 Windows 음성으로 읽음. 0이면 제한 없음 (이때 유료 서비스는 미리 만들기를 하지 않음)")));
+            var limitHint = Hint(T("characters; past it Windows' voice reads until next month. 0: no limit (a paid service then makes nothing ahead)", "자. 넘으면 다음 달까지 Windows 음성으로 읽음. 0이면 제한 없음 (이때 유료 서비스는 미리 만들기를 하지 않음)"));
+            // Beside the box: kept within the page.
+            limitHint.MaximumSize = new Size(400, 0);
+            limitRow.Controls.Add(limitHint);
             Row(grid, T("Monthly limit", "월 한도"), limitRow);
 
             var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
@@ -992,8 +1028,30 @@ namespace RainbowMage.OverlayPlugin.Tts
             ShowOwner();
         }
 
+        // TTS on, but cactbot outputs its alerts without it: none of them is read (cactbot says how
+        // when it starts; see TtsService.CactbotOutput).
+        private void ShowCactbotNote()
+        {
+            if (cactbotNote == null || cactbotNote.IsDisposed)
+                return;
+            string output = service.CactbotOutput;
+            string name;
+            switch (output)
+            {
+                case "textAndSound": name = T("Text and sound", "텍스트와 소리"); break;
+                case "textOnly": name = T("Text only", "텍스트만"); break;
+                case "disabled": name = T("Disabled", "비활성화"); break;
+                default: name = null; break;
+            }
+            cactbotNote.Visible = config.Enabled && name != null;
+            if (name != null)
+                cactbotNote.Text = T($"cactbot's alerts are not read now: its default alert output is \"{name}\". Set it to \"Text and TTS\" in cactbot's config (Raidboss > Language and output), or with the button in its TTS voice card.",
+                    $"캑봇 알림은 지금 읽지 않습니다. 캑봇의 '기본 알람 출력 방식'이 '{name}'입니다. 캑봇 설정 > 레이드보스 > 언어·출력에서 '텍스트와 TTS'로 바꾸세요 (TTS 음성 칸의 버튼으로도 바꿀 수 있음).");
+        }
+
         private void ShowOwner()
         {
+            ShowCactbotNote();
             if (bridge == null)
                 return;
             string who;
@@ -1023,8 +1081,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (provider == null)
                 return null;
             var s = new TtsSettings(provider, config);
+            // An address without its query: a key is sometimes pasted into it.
+            string Shown(TtsField f) =>
+                f.Key == "url" && Uri.TryCreate(s[f.Key], UriKind.Absolute, out var url) ? url.GetLeftPart(UriPartial.Path) : s[f.Key];
             var shown = provider.Fields.Where(f => f.Kind != TtsFieldKind.Secret && f.Kind != TtsFieldKind.Multiline && !string.IsNullOrEmpty(s[f.Key]))
-                .Select(f => $"{f.Key}={s[f.Key]}");
+                .Select(f => $"{f.Key}={Shown(f)}");
             return $"TTS: {provider.Name} [{string.Join(", ", shown)}] speed={config.Speed:0.##}";
         }
 
@@ -1033,15 +1094,22 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             if (error.Contains("paid_plan_required"))
                 return T("This voice needs a paid plan (pick a default voice). ", "이 목소리는 유료 플랜이 필요합니다 (기본 목소리를 고르세요). ");
-            if (error.StartsWith("401") || error.StartsWith("403"))
-                return T("The key is wrong or lacks permission. ", "키가 맞지 않거나 권한이 없습니다. ");
-            if (error.StartsWith("402"))
-                return T("The plan or credits do not allow it. ", "플랜이나 크레딧이 부족합니다. ");
-            if (error.StartsWith("429"))
-                return T("Too many requests or over the limit (try again later). ", "요청이 너무 많거나 한도를 넘었습니다 (잠시 후 다시). ");
-            if (error.StartsWith("404"))
-                return T("Not found (check the model, voice or address). ", "찾을 수 없습니다 (모델, 목소리, 주소 확인). ");
-            return "";
+            // The status, first or after the service's name ("ElevenLabs: 401 Unauthorized: ...").
+            var status = System.Text.RegularExpressions.Regex.Match(error, "(?:^|: )(40[1-4]|429) ").Groups[1].Value;
+            switch (status)
+            {
+                case "401":
+                case "403":
+                    return T("The key is wrong or lacks permission. ", "키가 맞지 않거나 권한이 없습니다. ");
+                case "402":
+                    return T("The plan or credits do not allow it. ", "플랜이나 크레딧이 부족합니다. ");
+                case "429":
+                    return T("Too many requests or over the limit (try again later). ", "요청이 너무 많거나 한도를 넘었습니다 (잠시 후 다시). ");
+                case "404":
+                    return T("Not found (check the model, voice or address). ", "찾을 수 없습니다 (모델, 목소리, 주소 확인). ");
+                default:
+                    return "";
+            }
         }
 
         private void OnSpoken(TtsResult r)

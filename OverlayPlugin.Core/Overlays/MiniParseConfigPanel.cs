@@ -221,11 +221,13 @@ namespace RainbowMage.OverlayPlugin.Overlays
 
         private CheckBox cbMatchRefreshRate;
 
-        // Fork: the frame rate options are for CEF; WebView2 draws with the display.
+        // Fork: the frame rate options are for CEF; WebView2 draws with the display.  Without the
+        // runtime the overlay is drawn by CEF whatever the setting, so they are for it then.
         private void UpdateFrameRateOptions()
         {
-            cbMatchRefreshRate.Enabled = !config.UseWebView2;
-            nudMaxFrameRate.Enabled = !config.UseWebView2 && !config.MatchRefreshRate;
+            bool webView2 = config.UseWebView2 && HtmlRenderer.Renderer.WebView2Available;
+            cbMatchRefreshRate.Enabled = !webView2;
+            nudMaxFrameRate.Enabled = !webView2 && !config.MatchRefreshRate;
         }
 
         // Fork: the zoom as the scale it gives, which can also be typed in.  Config.Zoom is a

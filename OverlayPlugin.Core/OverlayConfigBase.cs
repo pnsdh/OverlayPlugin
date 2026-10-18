@@ -273,7 +273,8 @@ namespace RainbowMage.OverlayPlugin
             this.Position = new Point(20, 20);
             this.Size = new Size(300, 300);
             this.Url = "";
-            this.MaxFrameRate = 30;
+            // Fork: 60 (for CEF; WebView2 draws with the display).
+            this.MaxFrameRate = 60;
             this.GlobalHotkeys = new List<GlobalHotkey>();
             this.logConsoleMessages = true;
         }
