@@ -102,7 +102,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
             var voice = Section(basic, T("Voice", "음성"));
             var voiceGrid = Grid(voice);
-            Row(voiceGrid, T("Engine", "엔진"), Combo(service.Providers.Select(p => new Item($"{p.Name}  —  {p.Note}", p.Id)), config.Provider, v =>
+            Row(voiceGrid, T("Engine", "엔진"), Combo(service.Providers.Select(p => new Item($"{p.Name} ({p.Note})", p.Id)), config.Provider, v =>
             {
                 config.Provider = (string)v;
                 Changed();
@@ -132,7 +132,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             var reset = Section(basic, T("Settings", "설정"));
             reset.Controls.Add(Button(T("Reset settings to defaults...", "설정을 기본값으로..."), ResetToDefaults));
             reset.Controls.Add(Hint(T("Engines' voices and quality go back too; API keys, addresses and regions, downloaded models, usage counts, made speech and your own rules are kept.",
-                "엔진별 목소리·품질도 돌아가고, API 키·주소·지역, 내려받은 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다.")));
+                "엔진별 목소리·품질도 돌아가고, API 키·주소·지역, 다운로드한 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다.")));
 
             // When alerts come together.
             var alerts = Page(T("Alerts", "알림 처리"));
@@ -322,7 +322,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             if (MessageBox.Show(this,
                 T("Reset the TTS settings to their defaults, engines' voices and quality included? API keys, addresses and regions, a hand-written HTTP request, downloaded models, usage counts, made speech and your own rules are kept.",
-                  "TTS 설정을 기본값으로 되돌릴까요? 엔진별 목소리·품질 같은 설정도 돌아갑니다. API 키·주소·지역, 직접 작성한 HTTP 요청, 내려받은 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다."),
+                  "TTS 설정을 기본값으로 되돌릴까요? 엔진별 목소리·품질 같은 설정도 돌아갑니다. API 키·주소·지역, 직접 작성한 HTTP 요청, 다운로드한 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다."),
                 "TTS", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
             var d = new TtsConfig();
@@ -678,22 +678,22 @@ namespace RainbowMage.OverlayPlugin.Tts
                 bool busy = downloading != null;
                 status.Text = model.Ready
                     ? T($"Downloaded ({Mb(model.SizeOnDisk())} MB on disk). Loaded while chosen (a few hundred MB of memory).",
-                        $"내려받음 (디스크 {Mb(model.SizeOnDisk())}MB). 이 엔진을 고른 동안 메모리를 수백 MB 씁니다.")
+                        $"다운로드함 (디스크 {Mb(model.SizeOnDisk())}MB). 이 엔진을 고른 동안 메모리를 수백 MB 씁니다.")
                     : busy ? status.Text
                     : T($"Not downloaded. About {Mb(model.DownloadSize)} MB, only when you ask for it.",
-                        $"아직 내려받지 않았습니다. 약 {Mb(model.DownloadSize)}MB이며 누를 때만 받습니다.");
+                        $"아직 다운로드하지 않았습니다. 약 {Mb(model.DownloadSize)}MB이며 누를 때만 다운로드합니다.");
                 if (model.Ready && model.LoadError != null && !busy)
                     status.Text = model.LoadError;
                 download.Visible = !model.Ready && !busy;
                 cancel.Visible = busy;
                 delete.Visible = !busy && (model.Ready || model.SizeOnDisk() > 0);
             }
-            download = Button(T("Download", "내려받기"), async () =>
+            download = Button(T("Download", "다운로드"), async () =>
             {
                 downloading = new System.Threading.CancellationTokenSource();
                 Show();
                 var progress = new Progress<(long Done, long Total)>(p =>
-                    downloadStatus?.Invoke(T($"Downloading... {Mb(p.Done)} / {Mb(p.Total)} MB", $"내려받는 중... {Mb(p.Done)} / {Mb(p.Total)}MB")));
+                    downloadStatus?.Invoke(T($"Downloading... {Mb(p.Done)} / {Mb(p.Total)} MB", $"다운로드 중... {Mb(p.Done)} / {Mb(p.Total)}MB")));
                 try
                 {
                     await model.Download(progress, downloading.Token);
@@ -706,8 +706,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                     downloading = null;
                     refreshDownload?.Invoke();
                     downloadStatus?.Invoke(ex is OperationCanceledException
-                            ? T("Download stopped (what came is kept; downloading again goes on from there).", "내려받기를 멈췄습니다 (받은 파일은 남아 있어 다시 누르면 이어서 받습니다).")
-                            : T("Download failed: ", "내려받지 못했습니다: ") + ex.GetBaseException().Message);
+                            ? T("Download stopped (what came is kept; downloading again goes on from there).", "다운로드를 멈췄습니다 (받은 파일은 남아 있어 다시 누르면 이어서 받습니다).")
+                            : T("Download failed: ", "다운로드하지 못했습니다: ") + ex.GetBaseException().Message);
                 }
             });
             cancel = Button(T("Stop", "멈추기"), () => downloading?.Cancel());
@@ -732,7 +732,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             var license = new LinkLabel
             {
                 AutoSize = true,
-                Text = T("Model license (OpenRAIL-M): downloading means you accept it", "모델 라이선스 (OpenRAIL-M): 내려받으면 이 조건에 동의하는 것입니다"),
+                Text = T("Model license (OpenRAIL-M): downloading means you accept it", "모델 라이선스 (OpenRAIL-M): 다운로드하면 이 조건에 동의하는 것입니다"),
                 Margin = new Padding(3, 0, 3, 3),
             };
             license.LinkClicked += (o, e) => System.Diagnostics.Process.Start(model.LicenseUrl);

@@ -17,7 +17,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         public string Id => ProviderId;
         public string Name => "Windows";
-        public string Note => System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko" ? "무료, 이 PC" : "free, on this PC";
+        public string Note => System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko" ? "무료, 내 컴퓨터에서 실행" : "free, runs on your computer";
         public double MinSpeed => 0.5;
         public double MaxSpeed => 2.0;
         public bool IsSlow => false;

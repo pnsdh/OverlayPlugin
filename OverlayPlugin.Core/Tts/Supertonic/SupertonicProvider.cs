@@ -20,7 +20,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
 
         public string Id => "supertonic";
         public string Name => "Supertonic";
-        public string Note => Ko ? "무료, 이 PC, 내려받기 필요" : "free, on this PC, download needed";
+        public string Note => Ko ? "무료, 내 컴퓨터에서 실행, 다운로드 필요" : "free, runs on your computer, download needed";
         public bool IsSlow => true;
         // Its model speaks well only between 0.9 and 1.5 times its own speed (slower skips words).
         public double MinSpeed => 0.9;
@@ -97,7 +97,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                 if (loadError != null)
                     throw new InvalidOperationException(loadError);
                 if (!SupertonicModel.Ready)
-                    throw new InvalidOperationException(Ko ? "Supertonic을 아직 내려받지 않았습니다 (TTS 탭에서 내려받기)" : "Supertonic is not downloaded (download it in the TTS tab)");
+                    throw new InvalidOperationException(Ko ? "Supertonic을 아직 다운로드하지 않았습니다 (TTS 탭에서 다운로드)" : "Supertonic is not downloaded (download it in the TTS tab)");
                 startedAt = generation;
             }
 
@@ -127,7 +127,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                 catch (Exception e)
                 {
                     lock (sync)
-                        loadError = (Ko ? "Supertonic을 불러오지 못했습니다 (다시 내려받아 보세요): " : "Supertonic could not be loaded (try downloading it again): ") + e.GetBaseException().Message;
+                        loadError = (Ko ? "Supertonic을 불러오지 못했습니다 (다시 다운로드해 보세요): " : "Supertonic could not be loaded (try downloading it again): ") + e.GetBaseException().Message;
                     throw new InvalidOperationException(loadError, e);
                 }
                 lock (sync)

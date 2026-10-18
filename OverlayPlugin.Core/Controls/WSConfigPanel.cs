@@ -129,7 +129,7 @@ namespace RainbowMage.OverlayPlugin
                     break;
 
                 case TunnelStatus.Downloading:
-                    simpStatusLbl.Text = Status("Downloading client...", "클라이언트 내려받는 중...");
+                    simpStatusLbl.Text = Status("Downloading client...", "클라이언트 다운로드 중...");
                     simpStatusLbl.ForeColor = Color.CornflowerBlue;
 
                     simpStartBtn.Enabled = false;
