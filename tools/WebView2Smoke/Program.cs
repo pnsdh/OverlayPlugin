@@ -32,6 +32,7 @@ static class Program
         if (Environment.GetEnvironmentVariable("SMOKE_MIXED") != null) { Mixed.Run(args[0], Environment.GetEnvironmentVariable("SMOKE_MIXED"), Environment.GetEnvironmentVariable("SMOKE_APPDATA")); return; }
         if (Environment.GetEnvironmentVariable("SMOKE_CTRL") != null) { Ctrl.Run(args[0], Environment.GetEnvironmentVariable("SMOKE_APPDATA"), Environment.GetEnvironmentVariable("SMOKE_CTRL"), args[2]); return; }
         if (Environment.GetEnvironmentVariable("SMOKE_LAZY") != null) { Lazy.Run(args[0], Environment.GetEnvironmentVariable("SMOKE_LAZY")); return; }
+        if (Environment.GetEnvironmentVariable("SMOKE_HIDDEN") != null) { Hidden.Run(args[0], Environment.GetEnvironmentVariable("SMOKE_APPDATA")); return; }
         var cache = Environment.GetEnvironmentVariable("SMOKE_CEFCACHE");
         if (cache != null)
             typeof(Renderer).GetField("CachePath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static).SetValue(null, cache);

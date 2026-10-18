@@ -38,6 +38,7 @@ bin\Release\net48\WebView2Smoke.exe <페이지 URL> <로그 파일>
 | `SMOKE_KILL=1` | WebView2 브라우저 프로세스가 죽은 뒤 페이지가 돌아오는지 |
 | `SMOKE_TDR=<폴더>` | GPU 옵션의 CEF 오버레이가 그래픽 드라이버 재시작 뒤에도 그리는지 |
 | `SMOKE_LAZY=<폴더>` | CEF 오버레이가 생기기 전까지 CEF가 시작되지 않는지 |
+| `SMOKE_HIDDEN=1` (`SMOKE_HIDDEN_SECONDS`) | 숨긴 오버레이(게임 창 비활성, 컷신)의 타이머가 제 속도로 도는지 (`hidden.html`, 기본 6초, 5분 넘는 제한은 360 이상) |
 | `SMOKE_CTRL=lazy\|eager` | ACT 설정 탭의 패널(OverlayControl)이 그려지는지 |
 | `SMOKE_MIXED=1` (`SMOKE_MIXED_AT`) | WebView2 오버레이가 나중에 CEF가 시작될 때 멈추지 않는지 |
 | `SMOKE_CEFCACHE` | CEF 캐시 폴더 |
