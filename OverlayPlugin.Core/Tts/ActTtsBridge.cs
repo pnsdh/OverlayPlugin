@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Advanced_Combat_Tracker;
 
 namespace RainbowMage.OverlayPlugin.Tts
