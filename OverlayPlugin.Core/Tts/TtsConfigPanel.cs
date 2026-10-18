@@ -157,8 +157,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
             var reset = Section(basic, T("Settings", "설정"));
             reset.Controls.Add(Button(T("Reset settings to defaults...", "설정을 기본값으로..."), ResetToDefaults));
-            reset.Controls.Add(Hint(T("Engines' voices and quality go back too; API keys, addresses and regions, downloaded models, usage counts, made speech and your own rules are kept.",
-                "엔진별 목소리·품질도 돌아가고, API 키·주소·지역, 다운로드한 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다.")));
+            reset.Controls.Add(Hint(T(KeptOnReset, KeptOnResetKo)));
 
             // When alerts come together.
             var alerts = Page(T("Alerts", "알림 처리"));
@@ -382,13 +381,16 @@ namespace RainbowMage.OverlayPlugin.Tts
             return strip;
         }
 
+        // What the reset leaves (the same in its button's hint and its question).
+        private const string KeptOnReset = "Engines' voices and quality go back too. Kept: whether TTS is on, API keys and IDs, addresses and regions, a hand-written HTTP request, downloaded models, usage counts, made speech and your own rules.";
+        private const string KeptOnResetKo = "엔진별 목소리·품질도 돌아갑니다. 그대로 두는 것: TTS 켜짐 여부, API 키·ID, 주소·지역, 직접 작성한 HTTP 요청, 다운로드한 모델, 사용량, 만든 음성, 직접 추가한 규칙.";
+
         // Every setting back to its default, but what the user brought or made: keys, downloaded
         // models, usage counts, made speech, their own rules (and whether TTS is on).
         private void ResetToDefaults()
         {
             if (MessageBox.Show(this,
-                T("Reset the TTS settings to their defaults, engines' voices and quality included? API keys, addresses and regions, a hand-written HTTP request, downloaded models, usage counts, made speech and your own rules are kept.",
-                  "TTS 설정을 기본값으로 되돌릴까요? 엔진별 목소리·품질 같은 설정도 돌아갑니다. API 키·주소·지역, 직접 작성한 HTTP 요청, 다운로드한 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다."),
+                T("Reset the TTS settings to their defaults? " + KeptOnReset, "TTS 설정을 기본값으로 되돌릴까요? " + KeptOnResetKo),
                 "TTS", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
                 return;
             var d = new TtsConfig();

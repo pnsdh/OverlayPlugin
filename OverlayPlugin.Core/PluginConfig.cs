@@ -319,6 +319,10 @@ namespace RainbowMage.OverlayPlugin
             }
         }
 
+        // Fork: WebView2 became the default after being an opt-in, which every overlay saved as
+        // off: overlays and panels moved to it once (see LoadJson).
+        public bool WebView2Moved { get; set; }
+
         [JsonIgnore]
         public OverlayConfigList<IOverlayConfig> Overlays { get; set; }
 
@@ -346,9 +350,11 @@ namespace RainbowMage.OverlayPlugin
 
             this.FollowLatestLog = false;
             this.HideOverlaysWhenNotActive = true;
-            this.HideOverlayDuringCutscene = false;
+            // Fork: on (nothing to see on the overlays then).
+            this.HideOverlayDuringCutscene = true;
             this.ErrorReports = false;
-            this.UseGpu = false;
+            // Fork: on (CEF overlays drawn on the GPU use less CPU at any frame rate).
+            this.UseGpu = true;
             this.PanelsUseWebView2 = true;
             this.UpdateCheck = true;
             this.IsFirstLaunch = true;
@@ -412,10 +418,20 @@ namespace RainbowMage.OverlayPlugin
                 this.WSServerPort = 10501;
                 this.WSServerRunning = false;
                 this.WSServerSSL = false;
+                this.WebView2Moved = true;
             }
+            // Fork: a config without them (written by hand, or by an old version) would leave the
+            // server without an address or port.
+            if (string.IsNullOrWhiteSpace(this.WSServerIP))
+                this.WSServerIP = "127.0.0.1";
+            if (this.WSServerPort <= 0 || this.WSServerPort > 65535)
+                this.WSServerPort = 10501;
 
-            this.isDirty = false;
+            // Saved again when overlays were moved to WebView2 (see LoadJson).
+            this.isDirty = movedToWebView2;
         }
+
+        private bool movedToWebView2;
 
         public void MarkDirty()
         {
@@ -558,6 +574,22 @@ namespace RainbowMage.OverlayPlugin
 
             this.OverlayObjects = overlayLeftOvers;
             this.unloadedOverlays = overlayLeftOvers;
+
+            // Fork: WebView2 is the default now; before, it was an experimental opt-in and every
+            // overlay saved it as off (whether chosen or not).  Moved once; switching back to CEF
+            // afterwards is kept.
+            if (!this.WebView2Moved)
+            {
+                foreach (var overlay in this.Overlays)
+                {
+                    if (overlay is OverlayConfigBase config)
+                        config.UseWebView2 = true;
+                }
+                this.PanelsUseWebView2 = true;
+                this.WebView2Moved = true;
+                this.movedToWebView2 = true;
+                this.logger.Log(LogLevel.Info, "LoadConfig: overlays and config panels moved to WebView2 (the new default).");
+            }
         }
 
         public static PluginConfig LoadJson(string path, TinyIoCContainer container)
