@@ -69,7 +69,7 @@ static class Program
         }
 
         Console.WriteLine("\n== text rules");
-        foreach (var t in new[] { "보스와 멀리 떨어지기 => 행동 멈추기", "돌진 + 넉백", "장판 바깥에 깔기 (3번)", "탱버 x2", "↖ 앞 왼쪽 / 뒤 오른쪽 ↘", "${rotation} 45° 이동", "분신：북->동->남", "힘내라!~", Opt("--text") }.Where(t => t != null))
+        foreach (var t in new[] { "보스와 멀리 떨어지기 => 행동 멈추기", "돌진 + 넉백", "장판 바깥에 깔기 (3번)", "탱버 x2", "↖ 앞 왼쪽 / 뒤 오른쪽 ↘", "${rotation} 45° 이동", "분신：북->동->남", "힘내라!~", "→ 오른쪽으로", "★ 탑 처리 ★", "파랑 α / 노랑 β", "「쉐어」 모이기…", "← 왼쪽 ↔ 오른쪽", Opt("--text") }.Where(t => t != null))
             Console.WriteLine($"  {t}\n    -> {tts.ProcessText(t, "ko")}");
 
         // Let the voice load (done at start, as in ACT).

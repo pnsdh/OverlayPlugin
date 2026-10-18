@@ -146,6 +146,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             }, config.QueueMode, v => config.QueueMode = (TtsQueueMode)v));
             Row(queueGrid, T("Drop if not started within", "이 시간 안에 못 읽으면 버리기"), Seconds(config.MaxWaitMs, 0.5m, 10, v => config.MaxWaitMs = v));
             Row(queueGrid, T("Same text again within", "같은 문장이 다시 오면 무시"), Seconds(config.RepeatWindowMs, 0, 10, v => config.RepeatWindowMs = v));
+            queue.Controls.Add(Hint(T("How important an alert is comes from the overlay (cactbot: alarm, alert, info). ACT's own speech (custom triggers, other plugins) says nothing of it and counts as least important.",
+                "알림이 얼마나 중요한지는 오버레이가 알려 줍니다 (캑봇: 경고, 주의, 정보). ACT가 읽는 것(커스텀 트리거, 다른 플러그인)은 중요도가 없어서 가장 낮은 것으로 칩니다.")));
 
             // Text made readable.
             var reading = Page(T("Reading", "읽기 규칙"));

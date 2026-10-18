@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,9 +36,18 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             new TtsField { Key = "steps", Label = "Quality (steps)", LabelKo = "품질 (단계 수)", Kind = TtsFieldKind.Choice, Default = "8", Choices = new[] { "3", "5", "8", "12" },
                 Hint = "More: better, slower (below 8 it may skip words, slow speeds more so)", HintKo = "많을수록 좋지만 느림 (8보다 낮으면 낱말을 건너뛸 수 있음, 느린 속도일수록)" },
             // Only how fast: the speech is the same, so made speech is kept when it changes.
-            new TtsField { Key = "threads", Label = "CPU threads", LabelKo = "CPU 스레드", Kind = TtsFieldKind.Choice, Default = "2", Choices = new[] { "1", "2", "4" },
-                Hint = "Fewer: lighter beside the game", HintKo = "적을수록 게임에 부담이 적음", NotInKey = true },
+            new TtsField { Key = "threads", Label = "CPU threads", LabelKo = "CPU 스레드", Kind = TtsFieldKind.Choice, Default = "2", Choices = ThreadChoices(),
+                ChoiceNames = ThreadChoices().Select(c => c == "2" ? "2 (default)" : c).ToArray(),
+                ChoiceNamesKo = ThreadChoices().Select(c => c == "2" ? "2 (기본)" : c).ToArray(),
+                Hint = $"While speech is made. More: made sooner, but the game shares more of the CPU meanwhile. Alerts made ahead (on entering a zone) take it for a while then, and none in the fight. This computer: {Environment.ProcessorCount} logical cores.",
+                HintKo = $"음성을 만드는 동안 쓰는 수. 많을수록 빨리 만들지만 그동안 게임과 CPU를 더 나눠 씁니다. 미리 만들기를 켜면 지역에 들어갈 때 한동안 몰리고, 전투 중에는 만들어 둔 음성을 씁니다. 이 컴퓨터: 논리 코어 {Environment.ProcessorCount}개.",
+                NotInKey = true },
         };
+
+        // Up to the computer's cores (more would only wait for each other); a config from a
+        // bigger computer is held to it too (Synthesize).
+        private static string[] ThreadChoices() =>
+            new[] { 1, 2, 3, 4, 6, 8, 12, 16 }.Where(n => n == 1 || n <= Environment.ProcessorCount).Select(n => n.ToString()).ToArray();
 
         private class Loaded
         {
@@ -65,7 +75,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
         public TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel)
         {
             int.TryParse(request.Settings["threads"], out int threads);
-            var loaded = Lease(Math.Max(1, threads));
+            var loaded = Lease(Math.Max(1, Math.Min(threads, Environment.ProcessorCount)));
             try
             {
                 int.TryParse(request.Settings["steps"], out int steps);

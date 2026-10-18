@@ -68,16 +68,31 @@ namespace RainbowMage.OverlayPlugin.Tts
         // Korean native numbers for counts ("x3" is "세 번", not "삼 번").
         private static readonly string[] koCounts = { "", "한", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉" };
 
+        // Raised when the built-in rules change: saved configs get the new ones (see Upgrade).
+        public const int RulesVersion = 2;
+
+        // The built-in rules replaced by the current ones (kept off if turned off, by their note),
+        // the user's own kept after them.
+        public static List<TtsReplacement> Upgrade(List<TtsReplacement> saved)
+        {
+            var off = new HashSet<string>(saved.Where(r => r.BuiltIn && !r.Enabled).Select(r => r.Note + "|" + r.Lang));
+            var list = DefaultReplacements();
+            foreach (var r in list)
+                r.Enabled = !off.Contains(r.Note + "|" + r.Lang);
+            list.AddRange(saved.Where(r => !r.BuiltIn));
+            return list;
+        }
+
         public static List<TtsReplacement> DefaultReplacements()
         {
             var list = new List<TtsReplacement>();
             void Add(string find, string replace, bool regex, string lang, string note) =>
                 list.Add(new TtsReplacement { Find = find, Replace = replace, Regex = regex, Lang = lang, BuiltIn = true, Note = note });
 
-            // Sequences: "a => b", "a -> b", "a → b".
-            Add(@"\s*(=>|->|→|⇒)\s*", " 다음 ", true, "ko", "a => b: 다음");
-            Add(@"\s*(=>|->|→|⇒)\s*", " then ", true, "en", "a => b: then");
-            Add(@"\s*(<=|<-|←)\s*", ", ", true, "", "a <= b: pause");
+            // Sequences: "a => b", "a -> b", "a → b" (between words; an arrow alone is drawn).
+            Add(@"(?<=\S)\s*(=>|->|→|⇒)\s*(?=\S)", " 다음 ", true, "ko", "a => b: 다음");
+            Add(@"(?<=\S)\s*(=>|->|→|⇒)\s*(?=\S)", " then ", true, "en", "a => b: then");
+            Add(@"(?<=\S)\s*(<=|<-|←|⇐)\s*(?=\S)", ", ", true, "", "a <= b: pause");
             // Counts: "x2" .. "x9".
             for (int n = 1; n <= 9; n++)
                 Add($@"(?<![A-Za-z0-9])[xX×]\s*{n}(?![0-9])", $" {koCounts[n]} 번", true, "ko", $"x{n}: {koCounts[n]} 번");
@@ -87,14 +102,23 @@ namespace RainbowMage.OverlayPlugin.Tts
             Add(@"\s*\+\s*", " and ", true, "en", "a + b: and");
             Add(@"\s*/\s*", " 또는 ", true, "ko", "a / b: 또는");
             Add(@"\s*/\s*", " or ", true, "en", "a / b: or");
+            Add(@"\s*&\s*", " 그리고 ", true, "ko", "a & b: 그리고");
+            Add(@"\s*&\s*", " and ", true, "en", "a & b: and");
+            // Greek letters naming markers or debuffs (파랑 α).
+            Add("α", " 알파", false, "ko", "α: 알파");
+            Add("β", " 베타", false, "ko", "β: 베타");
+            Add("γ", " 감마", false, "ko", "γ: 감마");
+            Add("δ", " 델타", false, "ko", "δ: 델타");
             Add("°", "도", false, "ko", "45°: 도");
             Add("°", " degrees", false, "en", "45°: degrees");
             // Pauses.
             Add(@"\s*[:：;·]\s*", ", ", true, "", ": ; · pause");
-            Add(@"\s*[\(（\[]\s*", ", ", true, "", "( pause");
-            Add(@"\s*[\)）\]]\s*", ", ", true, "", ") pause");
-            // Not read: arrows drawn beside the words, emphasis and markers.
-            Add(@"[↖↗↘↙↑↓]", " ", true, "", "drawn arrows");
+            Add(@"\s*(…+|\.{3,})\s*", ", ", true, "", "… pause");
+            Add(@"\s*[\(（\[「『【〈《]\s*", ", ", true, "", "( pause");
+            Add(@"\s*[\)）\]」』】〉》]\s*", ", ", true, "", ") pause");
+            // Not read: arrows drawn beside the words, symbols (★ ● ✔ ⚠...), emphasis and markers.
+            Add(@"[←→↑↓↔↕↖↗↘↙⇐⇒⇦⇧⇨⇩⬅⬆⬇➡↺↻]", " ", true, "", "drawn arrows");
+            Add(@"[\u25A0-\u25FF\u2600-\u27BF\u2B00-\u2BFF]", " ", true, "", "symbols ★ ● ✔ ⚠");
             Add(@"[~#""'`*_|]+", " ", true, "", "~ # \" ' marks");
             Add(@"\{\{CD\}\}", " ", true, "", "countdown marker");
             return list;

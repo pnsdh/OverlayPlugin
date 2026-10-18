@@ -80,6 +80,9 @@ namespace RainbowMage.OverlayPlugin.Tts
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
         public List<TtsReplacement> Replacements { get; set; } = TtsTextProcessor.DefaultReplacements();
 
+        // Which built-in rules the saved ones are (0: before this was kept, or a new config).
+        public int RulesVersion { get; set; }
+
         // A config edited by hand (or broken) with null lists: empty ones, rather than errors.
         [OnDeserialized]
         internal void Fix(StreamingContext context)
@@ -96,6 +99,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (Replacements == null)
                 Replacements = new List<TtsReplacement>();
             Replacements.RemoveAll(r => r == null);
+            if (RulesVersion < TtsTextProcessor.RulesVersion)
+            {
+                Replacements = TtsTextProcessor.Upgrade(Replacements);
+                RulesVersion = TtsTextProcessor.RulesVersion;
+            }
             if (Provider == null)
                 Provider = SapiProvider.ProviderId;
             if (Rate != 0)
