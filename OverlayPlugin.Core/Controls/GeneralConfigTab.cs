@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Data;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
@@ -35,7 +36,7 @@ namespace RainbowMage.OverlayPlugin
             logger = container.Resolve<ILogger>();
 
             cbErrorReports.Checked = config.ErrorReports;
-            SetupGpuOption();
+            SetupForkOptions();
             cbUpdateCheck.Checked = config.UpdateCheck;
             cbHideOverlaysWhenNotActive.Checked = config.HideOverlaysWhenNotActive;
             cbHideOverlaysDuringCutscene.Checked = config.HideOverlayDuringCutscene;
@@ -47,18 +48,26 @@ namespace RainbowMage.OverlayPlugin
             cbHideOverlaysDuringCutscene.CheckedChanged += cbHideOverlaysDuringCutscene_CheckedChanged;
         }
 
-        // Fork: crash reports are always off (see Renderer.EnableErrorReports), so their checkbox's
-        // place holds the GPU option.
-        private void SetupGpuOption()
+        // Fork: the options laid out again: the general ones first, then how things are drawn (the GPU
+        // option takes the place of the crash reports, which are always off, see
+        // Renderer.EnableErrorReports, and config panels drawn by WebView2, see
+        // Renderer.PanelsUseWebView2); buttons tall and wide enough for Korean text; a Discord link
+        // under GitHub's.  Positions are worked out from the designer's, which Windows has already
+        // scaled for the screen.
+        private void SetupForkOptions()
         {
             var ko = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
+            int row = cbUpdateCheck.Top - cbErrorReports.Top;
+            int top = cbErrorReports.Top;
+            int left = cbErrorReports.Left;
+            int gap = row / 2;
+
             var cbUseGpu = new CheckBox
             {
                 Name = "cbUseGpu",
                 Text = ko
                     ? "GPU로 오버레이 그리기 (CEF만, ACT를 다시 시작하면 적용. WebView2는 항상 GPU)"
                     : "Render overlays with the GPU (CEF overlays; applies after restarting ACT. WebView2 overlays always use it)",
-                Location = cbErrorReports.Location,
                 AutoSize = true,
                 UseVisualStyleBackColor = true,
                 Checked = config.UseGpu,
@@ -71,25 +80,12 @@ namespace RainbowMage.OverlayPlugin
                     ? "GPU 옵션은 ACT를 다시 시작해야 적용됩니다."
                     : "The GPU option applies after restarting ACT.");
             };
-            cbErrorReports.Visible = false;
-            Controls.Add(cbUseGpu);
-
-            // Fork: config panels drawn by WebView2 (see Renderer.PanelsUseWebView2), below; what
-            // was there moves down a line.
-            const int line = 25;
-            var top = cbHideOverlaysDuringCutscene.Bottom + 8;
-            foreach (Control control in Controls)
-            {
-                if (control.Top >= top)
-                    control.Top += line;
-            }
             var cbPanels = new CheckBox
             {
                 Name = "cbPanelsUseWebView2",
                 Text = ko
                     ? "플러그인 설정 화면(Cactbot 설정 등)도 WebView2로 그리기 (ACT를 다시 시작하면 적용)"
                     : "Draw plugins' config panels (e.g. cactbot's) with WebView2 too (applies after restarting ACT)",
-                Location = new System.Drawing.Point(cbErrorReports.Left, top),
                 AutoSize = true,
                 UseVisualStyleBackColor = true,
                 Checked = config.PanelsUseWebView2,
@@ -102,8 +98,69 @@ namespace RainbowMage.OverlayPlugin
                     ? "설정 화면을 그리는 방식은 ACT를 다시 시작해야 바뀝니다."
                     : "How config panels are drawn changes after restarting ACT.");
             };
+            cbErrorReports.Visible = false;
+            Controls.Add(cbUseGpu);
             Controls.Add(cbPanels);
+
+            // The options: general ones, then drawing.
+            var options = new Control[] { cbUpdateCheck, cbHideOverlaysWhenNotActive, cbHideOverlaysDuringCutscene };
+            for (int i = 0; i < options.Length; i++)
+                options[i].Location = new Point(left, top + i * row);
+            int drawing = top + options.Length * row + gap;
+            cbUseGpu.Location = new Point(left, drawing);
+            cbPanels.Location = new Point(left, drawing + row);
+
+            // The buttons, two to a row, each column as wide as its longest text.
+            int buttonHeight = btnUpdateCheck.Height + row / 5;
+            int buttonGap = btnClipboardTechSupport.Top - btnUpdateCheck.Bottom;
+            int buttonsTop = drawing + 2 * row + gap;
+            int Width(params Button[] buttons) => buttons.Max(b => Math.Max(b.Width, TextRenderer.MeasureText(b.Text, b.Font).Width + row));
+            int firstWidth = Width(btnUpdateCheck, btnClipboardTechSupport);
+            int secondWidth = Width(btnCactbotUpdate, btnClearCEFCache);
+            int secondLeft = btnUpdateCheck.Left + firstWidth + (btnCactbotUpdate.Left - btnUpdateCheck.Right);
+            void Place(Button b, int x, int y, int w) => b.Bounds = new Rectangle(x, y, w, buttonHeight);
+            Place(btnUpdateCheck, btnUpdateCheck.Left, buttonsTop, firstWidth);
+            Place(btnCactbotUpdate, secondLeft, buttonsTop, secondWidth);
+            Place(btnClipboardTechSupport, btnUpdateCheck.Left, buttonsTop + buttonHeight + buttonGap, firstWidth);
+            Place(btnClearCEFCache, secondLeft, buttonsTop + buttonHeight + buttonGap, secondWidth);
+
+            // What follows the buttons moves with them, with a Discord line under GitHub's.
+            int shift = btnClipboardTechSupport.Bottom + row - lblGithub.Top;
+            foreach (var c in new Control[] { lblGithub, lnkGithubRepo, lblReadMe, lblNewUserWelcome })
+                c.Top += shift;
+            var lblDiscord = new Label
+            {
+                Name = "lblDiscord",
+                Text = "Discord:",
+                AutoSize = true,
+                Location = new Point(lblGithub.Left, lblGithub.Top + row - row / 5),
+            };
+            var lnkDiscord = new LinkLabel
+            {
+                Name = "lnkDiscord",
+                Text = ClipboardTechSupport.DiscordInvite,
+                AutoSize = true,
+                Location = new Point(lnkGithubRepo.Left, lblDiscord.Top),
+            };
+            lnkDiscord.LinkClicked += (o, e) => Process.Start(ClipboardTechSupport.DiscordInvite);
+            Controls.Add(lblDiscord);
+            Controls.Add(lnkDiscord);
+            lblReadMe.Top += row;
+            lblNewUserWelcome.Top += row;
+
+            // A word after copying the tech support info: where it goes, and how long it is.
+            lblCopied = new Label
+            {
+                Name = "lblCopied",
+                AutoSize = true,
+                ForeColor = SystemColors.GrayText,
+                Visible = false,
+                Location = new Point(btnClearCEFCache.Right + row / 2, btnClearCEFCache.Top + (buttonHeight - Font.Height) / 2),
+            };
+            Controls.Add(lblCopied);
         }
+
+        private Label lblCopied;
 
         public void SetReadmeVisible(bool visible)
         {
@@ -233,7 +290,13 @@ namespace RainbowMage.OverlayPlugin
         private void btnClipboardTechSupport_Click(object sender, EventArgs e)
         {
             var info = new ClipboardTechSupport(this.container);
-            info.CopyToClipboard();
+            int length = info.CopyToClipboard();
+            // Fork: say it worked, and where to paste it.
+            var ko = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
+            lblCopied.Text = ko
+                ? $"복사했습니다 ({length}자). 디스코드에 붙여 넣으세요."
+                : $"Copied ({length} characters). Paste it in Discord.";
+            lblCopied.Visible = true;
         }
 
         private void btnClearCEFCache_Click(object sender, EventArgs e)
