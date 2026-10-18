@@ -662,9 +662,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             var voice = VoiceFor(provider, lang);
             var processor = Processor(voice?.Lang ?? lang);
             double speed = config.Speed;
-            var todo = texts.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => processor.Process(t)).Where(t => t != "")
-                .Distinct().Take(PrepareMax).Select(spoken => (spoken, key: KeyFor(provider, s, voice, voice?.Lang ?? lang, spoken, speed)))
-                .Where(x => FromMemory(x.key) == null && !disk.Has(x.key)).ToList();
+            var all = texts.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => processor.Process(t)).Where(t => t != "")
+                .Distinct().Take(PrepareMax).Select(spoken => (spoken, key: KeyFor(provider, s, voice, voice?.Lang ?? lang, spoken, speed))).ToList();
+            // What this zone needs and is already kept: the zone recorded for it too.
+            disk.Touch(all.Select(x => x.key), CurrentZone);
+            var todo = all.Where(x => FromMemory(x.key) == null && !disk.Has(x.key)).ToList();
             int done = 0, failures = 0;
             LastPrepare = (todo.Count, todo.Sum(x => (long)x.spoken.Length), TtsUsageCounter.Billed(provider));
             PrepareProgress = (0, todo.Count);
@@ -757,6 +759,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (kept != null)
             {
                 request.FromCache = true;
+                if (plan.Provider.IsSlow)
+                    disk.Touch(plan.Key, CurrentZone);
                 return kept;
             }
             if (!plan.Provider.IsSlow)
@@ -767,6 +771,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (kept != null)
             {
                 request.FromCache = true;
+                disk.Touch(plan.Key, CurrentZone);
                 Usage.Kept(plan.Provider);
                 return Keep(plan.Key, kept, null);
             }

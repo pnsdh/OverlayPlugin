@@ -18,8 +18,15 @@ namespace RainbowMage.OverlayPlugin.Tts
         public string Provider { get; set; }
         public string ProviderName { get; set; }
         public string Voice { get; set; }
+        // Where it was first made.
         public string Zone { get; set; }
+        // Every zone it was said (or made ahead) in, so removing a zone's speech keeps what other
+        // zones use (none: only Zone, as recorded before).
+        public List<string> Zones { get; set; }
         public string Text { get; set; }
+
+        public List<string> AllZones() =>
+            Zones != null && Zones.Count > 0 ? Zones : Zone != null ? new List<string> { Zone } : new List<string>();
         public bool Paid { get; set; }
         public long Bytes { get; set; }
         public DateTime Made { get; set; }
@@ -33,6 +40,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         public string Zone;
         public bool Paid;
         public int Count;
+        // Of them, also used in another zone (kept when this zone's are removed).
+        public int Shared;
         public long Bytes;
         public List<string> Files = new List<string>();
     }
@@ -192,6 +201,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                     info.File = name;
                     info.Bytes = bytes.Length;
                     info.Made = DateTime.Now;
+                    info.Zones = info.Zone != null ? new List<string> { info.Zone } : null;
                     lock (sync)
                     {
                         Index()[name] = info;
@@ -207,7 +217,40 @@ namespace RainbowMage.OverlayPlugin.Tts
             }
         }
 
-        // What is kept, by voice and zone (files made before the index was kept: one group).
+        // Said (or made ahead) in a zone: that zone recorded for it (once; written only when new).
+        public void Touch(IEnumerable<string> keys, string zone)
+        {
+            if (string.IsNullOrEmpty(zone))
+                return;
+            try
+            {
+                lock (sync)
+                {
+                    var known = Index();
+                    var lines = new StringBuilder();
+                    foreach (var key in keys)
+                    {
+                        if (!known.TryGetValue(NameOf(key), out var info))
+                            continue;
+                        var zones = info.AllZones();
+                        if (zones.Contains(zone))
+                            continue;
+                        info.Zones = new List<string>(zones) { zone };
+                        lines.Append(JsonConvert.SerializeObject(info)).Append('\n');
+                    }
+                    if (lines.Length > 0)
+                        File.AppendAllText(Path.Combine(folder, IndexName), lines.ToString());
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        public void Touch(string key, string zone) => Touch(new[] { key }, zone);
+
+        // What is kept, by voice and zone (a file in each zone it is used in; files made before
+        // the index was kept: one group).
         public List<TtsCacheGroup> Groups()
         {
             var groups = new Dictionary<string, TtsCacheGroup>();
@@ -222,27 +265,79 @@ namespace RainbowMage.OverlayPlugin.Tts
                 {
                     known.TryGetValue(file.Name, out var info);
                     string label = info == null ? null : string.IsNullOrEmpty(info.Voice) ? info.ProviderName : $"{info.ProviderName} · {info.Voice}";
-                    string key = $"{info?.Provider}|{label}|{info?.Zone}";
-                    if (!groups.TryGetValue(key, out var group))
+                    var zones = info?.AllZones() ?? new List<string>();
+                    foreach (var zone in zones.Count > 0 ? zones : new List<string> { null })
                     {
-                        groups[key] = group = new TtsCacheGroup
+                        string key = $"{info?.Provider}|{label}|{zone}";
+                        if (!groups.TryGetValue(key, out var group))
                         {
-                            Provider = info?.Provider ?? "",
-                            Label = label,
-                            Zone = info?.Zone,
-                            Paid = info?.Paid ?? false,
-                        };
+                            groups[key] = group = new TtsCacheGroup
+                            {
+                                Provider = info?.Provider ?? "",
+                                Label = label,
+                                Zone = zone,
+                                Paid = info?.Paid ?? false,
+                            };
+                        }
+                        group.Count++;
+                        group.Bytes += file.Length;
+                        group.Files.Add(file.Name);
+                        group.Paid |= info?.Paid ?? false;
+                        if (zones.Count > 1)
+                            group.Shared++;
                     }
-                    group.Count++;
-                    group.Bytes += file.Length;
-                    group.Files.Add(file.Name);
-                    group.Paid |= info?.Paid ?? false;
                 }
             }
             catch (Exception)
             {
             }
             return groups.Values.OrderBy(g => g.Label == null).ThenBy(g => g.Label).ThenBy(g => g.Zone).ToList();
+        }
+
+        // Groups' speech removed: a file goes when no zone it is used in is left; otherwise only
+        // the removed zones come off it.  Just counted when not apply (for asking first).
+        public (int Deleted, int Kept) Remove(IEnumerable<TtsCacheGroup> groups, bool apply)
+        {
+            lock (sync)
+            {
+                var known = Index();
+                var removing = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var group in groups)
+                {
+                    foreach (var file in group.Files)
+                    {
+                        if (!removing.TryGetValue(file, out var zones))
+                            removing[file] = zones = new HashSet<string>();
+                        // A group without a zone: the file itself.
+                        zones.Add(group.Zone ?? "\0");
+                    }
+                }
+                var delete = new List<string>();
+                var detach = new List<(TtsCacheInfo Info, List<string> Left)>();
+                foreach (var pair in removing)
+                {
+                    known.TryGetValue(pair.Key, out var info);
+                    var left = info == null || pair.Value.Contains("\0") ? new List<string>() : info.AllZones().Where(z => !pair.Value.Contains(z)).ToList();
+                    if (left.Count == 0)
+                        delete.Add(pair.Key);
+                    else
+                        detach.Add((info, left));
+                }
+                if (apply)
+                {
+                    foreach (var (info, left) in detach)
+                    {
+                        info.Zones = left;
+                        info.Zone = left[0];
+                    }
+                    // Saved by Delete (or here, when nothing goes).
+                    if (delete.Count > 0)
+                        Delete(delete);
+                    else if (detach.Count > 0)
+                        SaveIndex();
+                }
+                return (delete.Count, detach.Count);
+            }
         }
 
         public void Delete(IEnumerable<string> files)

@@ -36,6 +36,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private Control slowSection;
         private Control slowHeader;
         private CheckBox localPrepare;
+        private Label localPrepareHint;
         private Label speedHint;
         private TabControl tabs;
         private TabPage madePage;
@@ -203,6 +204,9 @@ namespace RainbowMage.OverlayPlugin.Tts
             localPrepare = Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
                 "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); });
             network.Controls.Add(localPrepare);
+            localPrepareHint = Hint(T("Usually not needed: made at the time, an alert is ready well within the fallback time. If This session below shows alerts read late, turn it on.",
+                "보통은 필요 없습니다. 그때그때 만들어도 대신 읽기 기준 시간 안에 넉넉히 준비됩니다. 아래 이번 접속 통계에 늦음이 자주 보이면 켜세요."));
+            network.Controls.Add(localPrepareHint);
             prepared = Hint("");
             network.Controls.Add(prepared);
             // How it did this session: whether making ahead is needed.
@@ -495,24 +499,25 @@ namespace RainbowMage.OverlayPlugin.Tts
                 return;
             var grid = madeGrid;
             int generation = ++madeGeneration;
-            System.Threading.Tasks.Task.Run(() => service.DiskCache.Groups()).ContinueWith(t =>
+            System.Threading.Tasks.Task.Run(() => (Groups: service.DiskCache.Groups(), Size: service.DiskCache.Size())).ContinueWith(t =>
             {
                 // An older scan finishing after a newer one (e.g. after a delete) is not shown.
                 if (grid.IsDisposed || t.IsFaulted || generation != madeGeneration)
                     return;
-                madeGroups = t.Result;
+                madeGroups = t.Result.Groups;
                 grid.Rows.Clear();
                 foreach (var g in madeGroups)
                 {
                     int i = grid.Rows.Add(false,
                         g.Label ?? T("(made before this was recorded)", "(기록 전에 만든 것)"),
                         g.Zone ?? T("(unknown)", "(모름)"),
-                        g.Count.ToString("N0"),
+                        g.Shared > 0 ? T($"{g.Count:N0} ({g.Shared:N0} shared)", $"{g.Count:N0} (공유 {g.Shared:N0})") : g.Count.ToString("N0"),
                         (g.Bytes / 1024.0 / 1024.0).ToString("0.0") + " MB",
                         g.Paid ? "✓" : "");
                     grid.Rows[i].Tag = g;
                 }
-                long total = madeGroups.Sum(g => g.Bytes);
+                // Each file once (a file used in several zones is in each zone's group).
+                long total = t.Result.Size;
                 if (!cacheSize.IsDisposed)
                     cacheSize.Text = T($"now {total / 1024.0 / 1024.0:0.0} MB", $"지금 {total / 1024.0 / 1024.0:0.0}MB");
             }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
@@ -522,17 +527,22 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             if (groups.Count == 0)
                 return;
-            int files = groups.Sum(g => g.Count);
-            int paid = groups.Where(g => g.Paid).Sum(g => g.Count);
-            var message = T($"Delete {files:N0} made texts?", $"만든 음성 {files:N0}개를 지울까요?");
-            if (paid > 0)
-                message += "\n\n" + T($"{paid:N0} of them were made by a paid service: they are made, and paid for, again when needed.",
-                    $"그중 {paid:N0}개는 유료 서비스로 만든 것입니다. 지우면 필요할 때 다시 만들며 요금도 다시 듭니다.");
-            if (MessageBox.Show(this, message, "TTS", MessageBoxButtons.OKCancel, paid > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.OK)
+            // Speech another zone also uses stays (only these zones come off it).
+            var plan = service.DiskCache.Remove(groups, false);
+            bool paid = groups.Any(g => g.Paid);
+            var message = plan.Deleted > 0
+                ? T($"Delete {plan.Deleted:N0} made texts?", $"만든 음성 {plan.Deleted:N0}개를 지울까요?")
+                : T("Nothing here is used by these zones alone, so nothing is deleted.", "이 지역에서만 쓰는 음성이 없어서 지울 것은 없습니다.");
+            if (plan.Kept > 0)
+                message += "\n\n" + T($"{plan.Kept:N0} more are also used in other zones: they are kept (only these zones come off them).",
+                    $"다른 지역에서도 쓰는 {plan.Kept:N0}개는 지우지 않고 남깁니다 (이 지역 표시만 뺍니다).");
+            if (paid && plan.Deleted > 0)
+                message += "\n\n" + T("Some were made by a paid service: they are made, and paid for, again when needed.",
+                    "유료 서비스로 만든 것이 있습니다. 지우면 필요할 때 다시 만들며 요금도 다시 듭니다.");
+            if (MessageBox.Show(this, message, "TTS", MessageBoxButtons.OKCancel, paid && plan.Deleted > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.OK)
                 return;
             // Off the UI thread (thousands of files take a while), shown again when done.
-            var names = groups.SelectMany(g => g.Files).ToList();
-            System.Threading.Tasks.Task.Run(() => service.DiskCache.Delete(names)).ContinueWith(_ =>
+            System.Threading.Tasks.Task.Run(() => service.DiskCache.Remove(groups, true)).ContinueWith(_ =>
             {
                 service.ClearMemory();
                 if (!IsDisposed)
@@ -623,7 +633,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (slowSection != null)
             {
                 slowSection.Visible = slowHeader.Visible = provider.IsSlow;
-                localPrepare.Visible = provider is ITtsDownloadable;
+                localPrepare.Visible = localPrepareHint.Visible = provider is ITtsDownloadable;
             }
             UpdateSpeed();
             ShowUsage();

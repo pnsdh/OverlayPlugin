@@ -123,6 +123,7 @@ static class Program
         config.OutputDevice = "";
 
         tts.Dispose();
+        DiskZonesTest();
         return RemoteTest(container, volume);
     }
 
@@ -288,6 +289,32 @@ static class Program
         listener.Stop();
         Console.WriteLine($"  disk cache: {cacheDir}");
         return 0;
+    }
+
+    // Made speech used in several zones: removing one zone's keeps what another zone uses.
+    static void DiskZonesTest()
+    {
+        Console.WriteLine("\n== made speech shared by zones");
+        string folder = Path.Combine(Path.GetTempPath(), "OverlayPluginTtsZones-" + Guid.NewGuid().ToString("N").Substring(0, 6));
+        var disk = new TtsDiskCache(folder, () => long.MaxValue);
+        var clip = new TtsClip(new float[2400], 24000);
+        TtsCacheInfo Info(string text) => new TtsCacheInfo { Provider = "bench", ProviderName = "Bench", Voice = "v", Zone = "A", Text = text };
+        disk.Put("k-shared", clip, Info("산개"));
+        disk.Put("k-only-a", clip, Info("A만"));
+        disk.Touch("k-shared", "B");
+        disk.Touch("k-shared", "B");
+        string Show() => string.Join(", ", disk.Groups().Select(g => $"{g.Zone}:{g.Count}(shared {g.Shared})"));
+        var before = Show();
+        var plan = disk.Remove(disk.Groups().Where(g => g.Zone == "A"), false);
+        disk.Remove(disk.Groups().Where(g => g.Zone == "A"), true);
+        var after = Show();
+        // Read again from the index file (a restart).
+        var again = new TtsDiskCache(folder, () => long.MaxValue);
+        var reread = string.Join(", ", again.Groups().Select(g => $"{g.Zone}:{g.Count}"));
+        bool ok = before == "A:2(shared 1), B:1(shared 1)" && plan.Deleted == 1 && plan.Kept == 1 && after == "B:1(shared 0)" && reread == "B:1"
+            && again.Has("k-shared") && !again.Has("k-only-a");
+        Console.WriteLine($"  before {before}; removing A: delete {plan.Deleted}, keep {plan.Kept}; after {after}; after a restart {reread} {(ok ? "ok" : "FAIL")}");
+        try { Directory.Delete(folder, true); } catch (Exception) { }
     }
 
     // Every network service's request with its options set, answered here (a short silence in

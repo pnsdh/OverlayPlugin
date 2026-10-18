@@ -48,9 +48,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         // voice, so even the first time an alert plays at once.
         public bool PrepareAhead { get; set; } = true;
 
-        // The same for a voice made on this PC (Supertonic): off unless asked for, as it would take
-        // the CPU for minutes beside the game (its first time is quick enough anyway).
-        public bool PrepareAheadLocal { get; set; } = true;
+        // The same for a voice made on this computer (Supertonic): off unless asked for, as it would
+        // take the CPU for minutes beside the game, and made at the time it is quick enough (a
+        // 24-player fight, Ryzen 5 7500F: 31 of 31 alerts in time, 0.37 s typical, 0.59 s at most).
+        public bool PrepareAheadLocal { get; set; } = false;
 
         // How much each paid voice was used (see TtsUsage), with the user's price and limit.
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
