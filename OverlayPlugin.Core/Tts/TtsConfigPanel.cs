@@ -773,8 +773,10 @@ namespace RainbowMage.OverlayPlugin.Tts
                 box.SelectedIndexChanged += (o, e) => Save(box.SelectedItem as string ?? "");
                 input = box;
             }
-            else if (field.Key == "voice" && provider is ITtsVoiceSource)
+            else if ((field.Key == "voice" && provider is ITtsVoiceSource) ||
+                (provider is ITtsChoiceSource choices && choices.ListedFields.Contains(field.Key)))
             {
+                bool voiceField = field.Key == "voice" && provider is ITtsVoiceSource;
                 // Typed, or picked from the list the service gives.
                 var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
                 var box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDown, Width = 380, Text = value };
@@ -786,7 +788,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                     status.Text = T("fetching...", "불러오는 중...");
                     try
                     {
-                        var voices = await service.FetchVoicesAsync();
+                        var voices = voiceField ? await service.FetchVoicesAsync() : await service.FetchChoicesAsync(field.Key);
                         if (box.IsDisposed)
                             return;
                         var current = box.Text;
@@ -796,7 +798,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                         foreach (var v in voices.OrderBy(v => v.Lang == lang ? 0 : 1).ThenBy(v => v.Name))
                             box.Items.Add(new Item(v.Name, v.Id));
                         box.Text = current;
-                        status.Text = T($"{voices.Count} voices", $"목소리 {voices.Count}개");
+                        status.Text = voiceField ? T($"{voices.Count} voices", $"목소리 {voices.Count}개") : T($"{voices.Count} found", $"{voices.Count}개");
                         box.DroppedDown = true;
                     }
                     catch (Exception ex)

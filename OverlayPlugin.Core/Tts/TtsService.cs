@@ -197,6 +197,13 @@ namespace RainbowMage.OverlayPlugin.Tts
             return Processor(voice?.Lang ?? lang).Process(text);
         }
 
+        public Task<IReadOnlyList<TtsVoice>> FetchChoicesAsync(string field)
+        {
+            var provider = Provider;
+            var s = Settings;
+            return Task.Run(() => provider is ITtsChoiceSource source ? source.FetchChoices(field, s, CancellationToken.None) : (IReadOnlyList<TtsVoice>)new TtsVoice[0]);
+        }
+
         public Task<IReadOnlyList<TtsVoice>> FetchVoicesAsync()
         {
             var provider = Provider;

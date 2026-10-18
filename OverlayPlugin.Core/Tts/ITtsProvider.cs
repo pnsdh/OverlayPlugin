@@ -50,6 +50,13 @@ namespace RainbowMage.OverlayPlugin.Tts
         void Delete();
     }
 
+    // A provider that can list other choices from the service (e.g. its models), by field.
+    public interface ITtsChoiceSource
+    {
+        IReadOnlyList<string> ListedFields { get; }
+        IReadOnlyList<TtsVoice> FetchChoices(string field, TtsSettings settings, CancellationToken cancel);
+    }
+
     // A provider that can list its voices from the service (with the user's key).
     public interface ITtsVoiceSource
     {

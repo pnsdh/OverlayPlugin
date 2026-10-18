@@ -289,8 +289,24 @@ namespace RainbowMage.OverlayPlugin.Tts
     // Google's Gemini speech (a key from Google AI Studio; its free tier has tight limits).  It has
     // no speed setting: how to speak is said in words before the text, and it answers slower than
     // the others, so made speech and fetching ahead matter most here.
-    public class GeminiProvider : RemoteProvider
+    public class GeminiProvider : RemoteProvider, ITtsChoiceSource
     {
+        public IReadOnlyList<string> ListedFields { get; } = new[] { "model" };
+
+        // The models that speak (their names have "tts"), as the key can use them.
+        public IReadOnlyList<TtsVoice> FetchChoices(string field, TtsSettings settings, CancellationToken cancel)
+        {
+            var message = new HttpRequestMessage(HttpMethod.Get, "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000");
+            message.Headers.Add("x-goog-api-key", Require(settings, "key", "API key"));
+            var json = JObject.Parse(Encoding.UTF8.GetString(TtsHttp.Send(message, cancel)));
+            return ((JArray)json["models"] ?? new JArray())
+                .Select(m => ((string)m["name"] ?? "").Replace("models/", ""))
+                .Where(n => n.IndexOf("tts", StringComparison.OrdinalIgnoreCase) >= 0)
+                .OrderByDescending(n => n)
+                .Select(n => new TtsVoice { Id = n, Name = n })
+                .ToList();
+        }
+
         public override string Id => "gemini";
         public override string Name => "Gemini TTS";
         public override string Note => Ko ? "유료, 무료 등급 있음 (제한 큼, 느림)" : "paid, a free tier (tight limits, slow)";
