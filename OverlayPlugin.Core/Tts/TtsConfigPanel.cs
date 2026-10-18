@@ -19,20 +19,25 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly ActTtsBridge bridge;
         private readonly IPluginConfig pluginConfig;
         private readonly TtsConfig config;
-        private readonly Label owner;
-        private readonly Label previewResult;
-        private readonly Label previewSpoken;
-        private readonly TextBox previewText;
-        private readonly DataGridView rules;
+        private Label owner;
+        private Label previewResult;
+        private Label previewSpoken;
+        private TextBox previewText;
+        private DataGridView rules;
         private readonly Timer ownerTimer;
-        private readonly FlowLayoutPanel providerFields;
-        private readonly Label cacheSize;
-        private readonly Label prepared;
-        private readonly FlowLayoutPanel usagePanel;
+        private FlowLayoutPanel providerFields;
+        private Label cacheSize;
+        private Label prepared;
+        private FlowLayoutPanel usagePanel;
         private readonly WheelGuard wheelGuard;
-        private readonly Control slowSection;
-        private readonly Control slowHeader;
-        private readonly CheckBox localPrepare;
+        private Control slowSection;
+        private Control slowHeader;
+        private CheckBox localPrepare;
+        private Label speedHint;
+        private TabControl tabs;
+        private TabPage madePage;
+        private DataGridView madeGrid;
+        private List<TtsCacheGroup> madeGroups = new List<TtsCacheGroup>();
         private Action refreshUsage;
         private bool loading;
 
@@ -42,25 +47,48 @@ namespace RainbowMage.OverlayPlugin.Tts
             container.TryResolve(ResolveOptions.FailUnregisteredOnly, out bridge);
             pluginConfig = container.Resolve<IPluginConfig>();
             config = service.Config;
-            loading = true;
 
             Dock = DockStyle.Fill;
-            AutoScroll = true;
-            // The wheel scrolls the tab, never a value under the pointer (see WheelGuard).
+            DoubleBuffered = true;
+            // The wheel scrolls the page, never a value under the pointer (see WheelGuard).
             wheelGuard = new WheelGuard(this);
             Application.AddMessageFilter(wheelGuard);
-            var root = new TableLayoutPanel
+            service.Usage.Changed += OnUsageChanged;
+            service.Prepared += OnPrepared;
+            service.Spoken += OnSpoken;
+            ownerTimer = new Timer { Interval = 2000 };
+            ownerTimer.Tick += (o, e) => ShowOwner();
+            VisibleChanged += (o, e) =>
             {
-                ColumnCount = 1,
-                Dock = DockStyle.Top,
-                AutoSize = true,
-                AutoSizeMode = AutoSizeMode.GrowAndShrink,
-                Padding = new Padding(8),
+                ownerTimer.Enabled = Visible;
+                if (Visible)
+                {
+                    ShowOwner();
+                    OnPrepared(service.PrepareProgress.Done, service.PrepareProgress.Total);
+                    refreshDownload?.Invoke();
+                    refreshUsage?.Invoke();
+                }
             };
-            Controls.Add(root);
+            Build();
+        }
 
-            // What reads.
-            var general = Section(root, T("Text to speech", "TTS"));
+        // The tab's contents, made again after a reset to defaults.  Laid out once at the end (not
+        // control by control), so it does not show half-built.  Pages: the voice, alerts
+        // overlapping, reading rules, made speech and usage; the preview below them all.
+        private void Build()
+        {
+            loading = true;
+            SuspendLayout();
+            foreach (Control c in Controls.Cast<Control>().ToList())
+                c.Dispose();
+            Controls.Clear();
+            tabs = new TabControl { Dock = DockStyle.Fill };
+            Controls.Add(tabs);
+            Controls.Add(PreviewStrip());
+
+            // The voice.
+            var basic = Page(T("Voice", "기본"));
+            var general = Section(basic, T("Text to speech", "TTS"));
             general.Controls.Add(Check(T("Read alerts with this plugin's TTS (off: ACT's own TTS, as before)", "알림을 이 플러그인의 TTS로 읽기 (끄면 지금까지처럼 ACT의 TTS)"),
                 config.Enabled, v => { config.Enabled = v; ApplyBridge(); Changed(); }));
             general.Controls.Add(Check(T("Also read what ACT itself speaks (its custom triggers, other plugins)", "ACT가 읽는 것(커스텀 트리거, 다른 플러그인)도 이 플러그인으로 읽기"),
@@ -70,70 +98,26 @@ namespace RainbowMage.OverlayPlugin.Tts
             owner = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Margin = new Padding(3, 2, 3, 6) };
             general.Controls.Add(owner);
 
-            // The voice.
-            var voice = Section(root, T("Voice", "음성"));
+            var voice = Section(basic, T("Voice", "음성"));
             var voiceGrid = Grid(voice);
-            var providerBox = Combo(service.Providers.Select(p => new Item(p.Name, p.Id)), config.Provider, v =>
+            Row(voiceGrid, T("Engine", "엔진"), Combo(service.Providers.Select(p => new Item(p.Name, p.Id)), config.Provider, v =>
             {
                 config.Provider = (string)v;
                 Changed();
                 ShowProviderFields();
-            });
-            Row(voiceGrid, T("Engine", "엔진"), providerBox);
+            }));
             // The chosen engine's own settings (voice, or address, key...), made again when it changes.
             providerFields = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
             voice.Controls.Add(providerFields);
             var voiceGrid2 = Grid(voice);
-            voiceGrid = voiceGrid2;
-            Row(voiceGrid, T("Speed", "속도"), Slider(-10, 10, config.Rate, v => { config.Rate = v; Changed(); }, v => v == 0 ? T("normal", "보통") : (v > 0 ? "+" : "") + v));
+            Row(voiceGrid2, T("Speed", "속도"), Slider(-10, 10, config.Rate, v => { config.Rate = v; Changed(); }, v => v == 0 ? T("normal", "보통") : (v > 0 ? "+" : "") + v));
             var devices = new List<Item> { new Item(T("Default device", "기본 장치"), "") };
             devices.AddRange(TtsPlayer.GetDevices().Select(d => new Item(d.Name, d.Id)));
-            Row(voiceGrid, T("Output", "출력 장치"), Combo(devices, config.OutputDevice, v => config.OutputDevice = (string)v));
+            Row(voiceGrid2, T("Output", "출력 장치"), Combo(devices, config.OutputDevice, v => config.OutputDevice = (string)v));
+            speedHint = Hint("");
+            voice.Controls.Add(speedHint);
 
-            // Voices over the network.
-            var network = Section(root, T("Slower voices (network, Supertonic)", "느린 음성 (네트워크, Supertonic)"));
-            // Shown only for such a voice (see ShowProviderFields).
-            slowSection = network;
-            slowHeader = root.Controls[root.Controls.Count - 2];
-            var networkGrid = Grid(network);
-            Row(networkGrid, T("Windows' voice instead if not ready within", "이 시간 안에 준비 안 되면 Windows 음성으로 대신 읽기"), Seconds(config.FallbackMs, 0.1m, 5, v => config.FallbackMs = v, 0.1m));
-            var cacheRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-            var cacheBox = new NumericUpDown { Minimum = 0, Maximum = 10000, Increment = 50, Width = 80, Value = Math.Max(0, Math.Min(10000, config.DiskCacheMB)) };
-            cacheBox.ValueChanged += (o, e) =>
-            {
-                if (loading)
-                    return;
-                config.DiskCacheMB = (int)cacheBox.Value;
-                pluginConfig.MarkDirty();
-            };
-            cacheRow.Controls.Add(cacheBox);
-            cacheRow.Controls.Add(new Label { Text = "MB", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 12, 3) });
-            cacheSize = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 12, 3) };
-            cacheRow.Controls.Add(cacheSize);
-            cacheRow.Controls.Add(Button(T("Empty", "비우기"), () =>
-            {
-                service.ClearCaches();
-                ShowCacheSize();
-            }));
-            Row(networkGrid, T("Keep made speech on disk", "만든 음성을 디스크에 보관"), cacheRow);
-            network.Controls.Add(Hint(T("An alert is made (and, with a paid service, paid for) once; after that it plays at once, also after restarting ACT.",
-                "한 번 만든 알림은 다시 만들지 않고(유료 서비스는 요금도 한 번) 바로 재생합니다. ACT를 다시 시작해도 남습니다.")));
-            network.Controls.Add(Check(T("On entering a zone, make its alerts ahead (so the first time is quick too; a paid service charges each once)",
-                "지역에 들어가면 그 지역 알림을 미리 만들어 두기 (처음에도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => { config.PrepareAhead = v; if (!v) service.CancelPrepare(); }));
-            localPrepare = Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
-                "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); });
-            network.Controls.Add(localPrepare);
-            prepared = Hint("");
-            network.Controls.Add(prepared);
-            // A paid voice's usage (made again with the provider's fields).
-            usagePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
-            network.Controls.Add(usagePanel);
-            service.Usage.Changed += OnUsageChanged;
-            service.Prepared += OnPrepared;
-            OnPrepared(service.PrepareProgress.Done, service.PrepareProgress.Total);
-
-            // How loud.
-            var volume = Section(root, T("Volume", "볼륨"));
+            var volume = Section(basic, T("Volume", "볼륨"));
             var volumeGrid = Grid(volume);
             string Percent(int v) => v + "%";
             Row(volumeGrid, T("All speech", "전체"), Slider(0, 100, config.Volume, v => config.Volume = v, Percent));
@@ -142,8 +126,14 @@ namespace RainbowMage.OverlayPlugin.Tts
             Row(volumeGrid, T("Info", "정보"), Slider(0, 100, config.InfoVolume, v => config.InfoVolume = v, Percent));
             Row(volumeGrid, T("Other (ACT, other plugins)", "기타 (ACT, 다른 플러그인)"), Slider(0, 100, config.OtherVolume, v => config.OtherVolume = v, Percent));
 
+            var reset = Section(basic, T("Settings", "설정"));
+            reset.Controls.Add(Button(T("Reset settings to defaults...", "설정을 기본값으로..."), ResetToDefaults));
+            reset.Controls.Add(Hint(T("API keys, downloaded models, usage counts, made speech and your own rules are kept.",
+                "API 키, 내려받은 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다.")));
+
             // When alerts come together.
-            var queue = Section(root, T("When alerts overlap", "알림이 겹칠 때"));
+            var alerts = Page(T("Alerts", "알림 처리"));
+            var queue = Section(alerts, T("When alerts overlap", "알림이 겹칠 때"));
             var queueGrid = Grid(queue);
             Row(queueGrid, T("A new alert", "새 알림이 오면"), Combo(new[]
             {
@@ -155,60 +145,248 @@ namespace RainbowMage.OverlayPlugin.Tts
             Row(queueGrid, T("Same text again within", "같은 문장이 다시 오면 무시"), Seconds(config.RepeatWindowMs, 0, 10, v => config.RepeatWindowMs = v));
 
             // Text made readable.
-            var text = Section(root, T("Before reading", "읽기 전에 바꾸기"));
+            var reading = Page(T("Reading", "읽기 규칙"));
+            var text = Section(reading, T("Before reading", "읽기 전에 바꾸기"));
             text.Controls.Add(Check(T("Read text in brackets too", "괄호 안도 읽기"), config.ReadBrackets, v => { config.ReadBrackets = v; Changed(); }));
-            text.Controls.Add(new Label
-            {
-                AutoSize = true,
-                MaximumSize = new Size(760, 0),
-                Text = T("Applied in order, top first. Language: only for voices of that language (empty: all). Regular expressions can use $1 in the replacement.",
-                    "위에서부터 차례로 바꿉니다. 언어: 그 언어의 목소리일 때만 (비우면 전부). 정규식은 바꿀 말에 $1 등을 쓸 수 있습니다."),
-            });
+            text.Controls.Add(Hint(T("Applied in order, top first. Language: only for voices of that language (empty: all). Regular expressions can use $1 in the replacement. A row is deleted by selecting it on its left edge and pressing Delete.",
+                "위에서부터 차례로 바꿉니다. 언어: 그 언어의 목소리일 때만 (비우면 전부). 정규식은 바꿀 말에 $1 등을 쓸 수 있습니다. 행은 왼쪽 끝을 눌러 고른 뒤 Delete 키로 지웁니다.")));
             rules = RulesGrid();
             text.Controls.Add(rules);
-            var buttons = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0) };
-            buttons.Controls.Add(Button(T("Restore built-in rules", "기본 규칙 되돌리기"), RestoreBuiltIns));
-            text.Controls.Add(buttons);
+            text.Controls.Add(Button(T("Restore built-in rules", "기본 규칙 되돌리기"), RestoreBuiltIns));
 
-            // Try it.
-            var preview = Section(root, T("Try it", "미리 듣기"));
-            var previewRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
-            previewText = new TextBox { Width = 460, Text = T("Away from boss => stop (3 times) x2", "보스와 멀리 떨어지기 => 행동 멈추기 (3번) 탱버 x2") };
-            previewText.TextChanged += (o, e) => ShowSpoken();
-            previewRow.Controls.Add(previewText);
-            previewRow.Controls.Add(Button(T("Read", "읽기"), () => service.Speak(previewText.Text, TtsSeverity.Alarm, "preview", Lang())));
-            preview.Controls.Add(previewRow);
-            previewSpoken = new Label { AutoSize = true, MaximumSize = new Size(760, 0) };
-            preview.Controls.Add(previewSpoken);
-            previewResult = new Label { AutoSize = true, ForeColor = SystemColors.GrayText };
-            preview.Controls.Add(previewResult);
-            service.Spoken += OnSpoken;
+            // Made speech and usage.
+            var made = Page(T("Made speech", "만든 음성·사용량"));
+            madePage = (TabPage)made.Parent;
+            var network = Section(made, T("Slower voices (network, Supertonic)", "느린 음성 (네트워크, Supertonic)"));
+            // Shown only for such a voice (see ShowProviderFields).
+            slowSection = network;
+            slowHeader = made.Controls[made.Controls.Count - 2];
+            var networkGrid = Grid(network);
+            Row(networkGrid, T("Windows' voice instead if not ready within", "이 시간 안에 준비 안 되면 Windows 음성으로 대신 읽기"), Seconds(config.FallbackMs, 0.1m, 5, v => config.FallbackMs = v, 0.1m));
+            network.Controls.Add(Hint(T("Not for the preview below, which waits for the voice itself.", "아래 미리 듣기에는 쓰지 않습니다 (그 목소리 자체를 기다림).")));
+            network.Controls.Add(Check(T("On entering a zone, make its alerts ahead (so the first time is quick too; a paid service charges each once)",
+                "지역에 들어가면 그 지역 알림을 미리 만들어 두기 (처음에도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => { config.PrepareAhead = v; if (!v) service.CancelPrepare(); }));
+            localPrepare = Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
+                "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); });
+            network.Controls.Add(localPrepare);
+            prepared = Hint("");
+            network.Controls.Add(prepared);
+            // A paid voice's usage (made again with the provider's fields).
+            usagePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
+            network.Controls.Add(usagePanel);
 
-            ownerTimer = new Timer { Interval = 2000 };
-            ownerTimer.Tick += (o, e) => ShowOwner();
-            VisibleChanged += (o, e) =>
+            MadeSection(made);
+            tabs.SelectedIndexChanged += (o, e) =>
             {
-                ownerTimer.Enabled = Visible;
-                if (Visible)
-                {
-                    ShowOwner();
-                    ShowCacheSize();
-                    OnPrepared(service.PrepareProgress.Done, service.PrepareProgress.Total);
-                    refreshDownload?.Invoke();
-                    refreshUsage?.Invoke();
-                }
+                if (tabs.SelectedTab == madePage)
+                    RefreshMade();
             };
+
             ShowOwner();
             ShowProviderFields();
-            ShowCacheSize();
             ShowSpoken();
+            OnPrepared(service.PrepareProgress.Done, service.PrepareProgress.Total);
+            ResumeLayout(true);
             loading = false;
         }
 
-        private void ShowCacheSize()
+        private TableLayoutPanel Page(string title)
         {
-            long bytes = service.DiskCache.Size();
-            cacheSize.Text = T($"now {bytes / 1024.0 / 1024.0:0.0} MB", $"지금 {bytes / 1024.0 / 1024.0:0.0}MB");
+            var page = new TabPage { Text = title, AutoScroll = true, UseVisualStyleBackColor = true };
+            var root = new TableLayoutPanel
+            {
+                ColumnCount = 1,
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(8),
+            };
+            page.Controls.Add(root);
+            tabs.TabPages.Add(page);
+            return root;
+        }
+
+        // Try it: below every page, so a change can be heard from where it is made.
+        private Control PreviewStrip()
+        {
+            var strip = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Bottom,
+                FlowDirection = FlowDirection.TopDown,
+                WrapContents = false,
+                AutoSize = true,
+                Padding = new Padding(8, 6, 8, 8),
+            };
+            strip.Controls.Add(new Label
+            {
+                Text = T("Try it (the chosen voice, waited for)", "미리 듣기 (고른 목소리를 기다려서 읽음)"),
+                AutoSize = true,
+                Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold),
+                Margin = new Padding(3, 0, 3, 3),
+            });
+            var row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            previewText = new TextBox { Width = 460, Text = T("Away from boss => stop (3 times) x2", "보스와 멀리 떨어지기 => 행동 멈추기 (3번) 탱버 x2") };
+            previewText.TextChanged += (o, e) => ShowSpoken();
+            row.Controls.Add(previewText);
+            row.Controls.Add(Button(T("Read", "읽기"), () =>
+            {
+                previewResult.Text = T("making...", "만드는 중...");
+                service.Speak(previewText.Text, TtsSeverity.Alarm, "preview", Lang());
+            }));
+            strip.Controls.Add(row);
+            previewSpoken = new Label { AutoSize = true, MaximumSize = new Size(760, 0) };
+            strip.Controls.Add(previewSpoken);
+            previewResult = new Label { AutoSize = true, MaximumSize = new Size(760, 0), ForeColor = SystemColors.GrayText };
+            strip.Controls.Add(previewResult);
+            return strip;
+        }
+
+        // Every setting back to its default, but what the user brought or made: keys, downloaded
+        // models, usage counts, made speech, their own rules (and whether TTS is on).
+        private void ResetToDefaults()
+        {
+            if (MessageBox.Show(this,
+                T("Reset the TTS settings to their defaults? API keys, downloaded models, usage counts, made speech and your own rules are kept.",
+                  "TTS 설정을 기본값으로 되돌릴까요? API 키, 내려받은 모델, 사용량, 만든 음성, 직접 추가한 규칙은 그대로 둡니다."),
+                "TTS", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK)
+                return;
+            var d = new TtsConfig();
+            config.TakeOverActTts = d.TakeOverActTts;
+            config.DeferToOtherPlugin = d.DeferToOtherPlugin;
+            config.Provider = d.Provider;
+            config.Voice = d.Voice;
+            config.Rate = d.Rate;
+            config.Volume = d.Volume;
+            config.AlarmVolume = d.AlarmVolume;
+            config.AlertVolume = d.AlertVolume;
+            config.InfoVolume = d.InfoVolume;
+            config.OtherVolume = d.OtherVolume;
+            config.OutputDevice = d.OutputDevice;
+            config.QueueMode = d.QueueMode;
+            config.MaxWaitMs = d.MaxWaitMs;
+            config.RepeatWindowMs = d.RepeatWindowMs;
+            config.ReadBrackets = d.ReadBrackets;
+            config.FallbackMs = d.FallbackMs;
+            config.DiskCacheMB = d.DiskCacheMB;
+            config.PrepareAhead = d.PrepareAhead;
+            config.PrepareAheadLocal = d.PrepareAheadLocal;
+            config.Replacements = TtsTextProcessor.DefaultReplacements().Concat(config.Replacements.Where(r => !r.BuiltIn)).ToList();
+            bridge?.Apply();
+            service.ConfigChanged();
+            pluginConfig.MarkDirty();
+            Build();
+        }
+
+        // Made speech on disk, by voice and zone: what it takes, whether it was paid for, removed by
+        // choice (asked first; a paid one is made, and paid for, again when needed).
+        private void MadeSection(TableLayoutPanel page)
+        {
+            var section = Section(page, T("Made speech on disk", "디스크에 보관한 음성"));
+            section.Controls.Add(Hint(T("Speech from slower voices is kept and played from here; it is not made (or paid for) again, also after restarting ACT. Over the size limit the oldest go first, free voices' before paid ones'.",
+                "느린 음성(네트워크, Supertonic)으로 만든 음성을 보관해 다시 만들지 않고(유료는 요금도 다시 안 듦) 바로 재생합니다. ACT를 다시 시작해도 남습니다. 크기 한도를 넘으면 오래된 것부터, 무료 음성 것을 먼저 지웁니다.")));
+            var sizeRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            var sizeBox = new NumericUpDown { Minimum = 0, Maximum = 10000, Increment = 50, Width = 80, Value = Math.Max(0, Math.Min(10000, config.DiskCacheMB)) };
+            sizeBox.ValueChanged += (o, e) =>
+            {
+                if (loading)
+                    return;
+                config.DiskCacheMB = (int)sizeBox.Value;
+                pluginConfig.MarkDirty();
+            };
+            sizeRow.Controls.Add(new Label { Text = T("Size limit", "크기 한도"), AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 6, 3) });
+            sizeRow.Controls.Add(sizeBox);
+            sizeRow.Controls.Add(new Label { Text = "MB", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 12, 3) });
+            cacheSize = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 12, 3) };
+            sizeRow.Controls.Add(cacheSize);
+            section.Controls.Add(sizeRow);
+
+            madeGrid = new DataGridView
+            {
+                Width = 760,
+                Height = 220,
+                AllowUserToAddRows = false,
+                AllowUserToDeleteRows = false,
+                AllowUserToResizeRows = false,
+                RowHeadersVisible = false,
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
+                SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+            };
+            madeGrid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Pick", HeaderText = T("Pick", "선택"), FillWeight = 10 });
+            madeGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Voice", HeaderText = T("Voice", "엔진 · 목소리"), FillWeight = 45, ReadOnly = true });
+            madeGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Zone", HeaderText = T("Zone", "지역"), FillWeight = 30, ReadOnly = true });
+            madeGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Count", HeaderText = T("Texts", "문장"), FillWeight = 10, ReadOnly = true });
+            madeGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Size", HeaderText = T("Size", "크기"), FillWeight = 12, ReadOnly = true });
+            madeGrid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Paid", HeaderText = T("Paid", "유료"), FillWeight = 8, ReadOnly = true });
+            foreach (DataGridViewColumn column in madeGrid.Columns)
+                column.SortMode = DataGridViewColumnSortMode.NotSortable;
+            madeGrid.CurrentCellDirtyStateChanged += (o, e) =>
+            {
+                if (madeGrid.IsCurrentCellDirty && madeGrid.CurrentCell is DataGridViewCheckBoxCell)
+                    madeGrid.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            };
+            section.Controls.Add(madeGrid);
+
+            var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            buttons.Controls.Add(Button(T("Refresh", "새로 고침"), RefreshMade));
+            buttons.Controls.Add(Button(T("Delete picked...", "선택한 것 지우기..."), () => DeleteMade(Picked())));
+            buttons.Controls.Add(Button(T("Delete all...", "모두 지우기..."), () => DeleteMade(madeGroups)));
+            section.Controls.Add(buttons);
+        }
+
+        private List<TtsCacheGroup> Picked()
+        {
+            var picked = new List<TtsCacheGroup>();
+            foreach (DataGridViewRow row in madeGrid.Rows)
+            {
+                if (row.Cells["Pick"].Value is bool b && b && row.Tag is TtsCacheGroup g)
+                    picked.Add(g);
+            }
+            return picked;
+        }
+
+        // Read off the UI thread (the folder can hold thousands of files), shown when done.
+        private void RefreshMade()
+        {
+            if (madeGrid == null)
+                return;
+            var grid = madeGrid;
+            System.Threading.Tasks.Task.Run(() => service.DiskCache.Groups()).ContinueWith(t =>
+            {
+                if (grid.IsDisposed || t.IsFaulted)
+                    return;
+                madeGroups = t.Result;
+                grid.Rows.Clear();
+                foreach (var g in madeGroups)
+                {
+                    int i = grid.Rows.Add(false,
+                        g.Label ?? T("(made before this was recorded)", "(기록 전에 만든 것)"),
+                        g.Zone ?? T("(unknown)", "(모름)"),
+                        g.Count.ToString("N0"),
+                        (g.Bytes / 1024.0 / 1024.0).ToString("0.0") + " MB",
+                        g.Paid ? "✓" : "");
+                    grid.Rows[i].Tag = g;
+                }
+                long total = madeGroups.Sum(g => g.Bytes);
+                if (!cacheSize.IsDisposed)
+                    cacheSize.Text = T($"now {total / 1024.0 / 1024.0:0.0} MB", $"지금 {total / 1024.0 / 1024.0:0.0}MB");
+            }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
+        }
+
+        private void DeleteMade(List<TtsCacheGroup> groups)
+        {
+            if (groups.Count == 0)
+                return;
+            int files = groups.Sum(g => g.Count);
+            int paid = groups.Where(g => g.Paid).Sum(g => g.Count);
+            var message = T($"Delete {files:N0} made texts?", $"만든 음성 {files:N0}개를 지울까요?");
+            if (paid > 0)
+                message += "\n\n" + T($"{paid:N0} of them were made by a paid service: they are made, and paid for, again when needed.",
+                    $"그중 {paid:N0}개는 유료 서비스로 만든 것입니다. 지우면 필요할 때 다시 만들며 요금도 다시 듭니다.");
+            if (MessageBox.Show(this, message, "TTS", MessageBoxButtons.OKCancel, paid > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Question) != DialogResult.OK)
+                return;
+            service.DiskCache.Delete(groups.SelectMany(g => g.Files));
+            service.ClearMemory();
+            RefreshMade();
         }
 
         // The engine's own settings: Windows' voices to pick from, or a service's fields.
@@ -250,6 +428,14 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 slowSection.Visible = slowHeader.Visible = provider.IsSlow;
                 localPrepare.Visible = provider is ITtsDownloadable;
+            }
+            if (speedHint != null)
+            {
+                speedHint.Text = provider is Supertonic.SupertonicProvider
+                    ? T("Supertonic speaks well only from 0.9 to 1.5 times its speed: faster or slower is read at that end.",
+                        "Supertonic은 0.9~1.5배 속도만 제대로 읽어, 그보다 빠르거나 느린 값은 끝값으로 읽습니다.")
+                    : "";
+                speedHint.Visible = speedHint.Text != "";
             }
             ShowUsage();
             loading = wasLoading;
@@ -782,8 +968,16 @@ namespace RainbowMage.OverlayPlugin.Tts
                         if (!IsInside(c))
                             return false;
                         int delta = (short)((long)m.WParam >> 16);
-                        var at = panel.AutoScrollPosition;
-                        panel.AutoScrollPosition = new Point(-at.X, -at.Y - delta);
+                        // The scrolling page it is on.
+                        for (var p = c.Parent; p != null && p != panel; p = p.Parent)
+                        {
+                            if (p is ScrollableControl page && page.AutoScroll)
+                            {
+                                var at = page.AutoScrollPosition;
+                                page.AutoScrollPosition = new Point(-at.X, -at.Y - delta);
+                                break;
+                            }
+                        }
                         return true;
                     }
                 }

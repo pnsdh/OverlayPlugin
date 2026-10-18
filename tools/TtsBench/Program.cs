@@ -216,6 +216,26 @@ static class Program
         usage.MonthlyLimit = usage.Chars + 3;
         Show("past the monthly limit", Say("한도를 넘는 새 문장"));
         usage.MonthlyLimit = 0;
+        // The preview waits for a slow voice (1.5 s) instead of Windows' voice.
+        lock (results) results.Clear();
+        tts2.Speak("느림 미리 듣기", TtsSeverity.Alarm, "preview", "ko");
+        Thread.Sleep(2500);
+        lock (results)
+        {
+            var r = results.LastOrDefault();
+            Console.WriteLine($"  preview of a slow voice: {(r == null ? "nothing" : r.FellBack ? "FAIL: Windows' voice" : $"ok, the voice itself after {r.MadeMs:0} ms")}");
+        }
+        // What is kept on disk, by voice and zone; a group removed.
+        Thread.Sleep(500);
+        var groups = tts2.DiskCache.Groups();
+        foreach (var g in groups)
+            Console.WriteLine($"  kept: {g.Label ?? "(no record)"} / {g.Zone ?? "(zone unknown)"}: {g.Count} texts, {g.Bytes} bytes, paid {g.Paid}");
+        if (groups.Count > 0)
+        {
+            tts2.DiskCache.Delete(groups[0].Files);
+            tts2.ClearMemory();
+            Console.WriteLine($"  after deleting the first group: {tts2.DiskCache.Groups().Sum(g => g.Count)} texts left");
+        }
         config.ProviderSettings["openai"]["key"] = TtsSecrets.Protect("bad-key");
         tts2.ConfigChanged();
         Show("bad key", Say("새 문장"));

@@ -103,6 +103,37 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         public TtsConfig Config => config;
+
+        // The zone now (for what made speech is kept with, see TtsDiskCache).
+        public string CurrentZone { get; private set; }
+
+        // Zone changes from the FFXIV plugin, once it is there (the plugin's second start phase).
+        public void WatchZone(FFXIVRepository repository)
+        {
+            repository.RegisterZoneChangeDelegate((id, name) =>
+                CurrentZone = string.IsNullOrEmpty(name) ? (id == 0 ? null : $"#{id}") : name);
+        }
+
+        private TtsCacheInfo Info(ITtsProvider provider, TtsVoice voice, string text) => new TtsCacheInfo
+        {
+            Provider = provider.Id,
+            ProviderName = provider.Name,
+            Voice = voice?.Id,
+            Zone = CurrentZone,
+            Text = text,
+            Paid = TtsUsageCounter.Billed(provider),
+        };
+
+        // Made speech forgotten in memory (after files were removed from disk).
+        public void ClearMemory()
+        {
+            lock (sync)
+            {
+                cache.Clear();
+                cacheOrder.Clear();
+                cacheBytes = 0;
+            }
+        }
         public TtsUsageCounter Usage { get; }
         public TtsDiskCache DiskCache => disk;
 
@@ -221,7 +252,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
                 // Waited too long: dropped here too, so the queue never grows while one plays.
                 long nowTicks = Stopwatch.GetTimestamp();
-                queue.RemoveAll(r => Ms(r.Asked, nowTicks) > config.MaxWaitMs);
+                queue.RemoveAll(r => !r.Preview && Ms(r.Asked, nowTicks) > config.MaxWaitMs);
                 queue.Add(request);
                 // Cut: what is being made is not played, what plays (or is starting) stops.
                 if (making != null && Cuts(request, making))
@@ -236,6 +267,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                 if (config.QueueMode == TtsQueueMode.InterruptAll)
                     queue.RemoveAll(r => r != request);
             }
+            // Trying Supertonic before turning TTS on: loaded for it (until a setting changes).
+            if (request.Preview && Provider == supertonic && !config.Enabled)
+                supertonic.Warm(Settings);
             // The output opens while the speech is made.
             ThreadPool.QueueUserWorkItem(_ => player.Prepare(config.OutputDevice));
             wake.Set();
@@ -322,7 +356,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private Request TakeNext()
         {
             long now = Stopwatch.GetTimestamp();
-            queue.RemoveAll(r => Ms(r.Asked, now) > config.MaxWaitMs);
+            queue.RemoveAll(r => !r.Preview && Ms(r.Asked, now) > config.MaxWaitMs);
             var next = queue.OrderByDescending(r => r.Severity).ThenBy(r => r.Asked).FirstOrDefault();
             if (next != null)
                 queue.Remove(next);
@@ -343,7 +377,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 making = null;
                 // Waited too long while being made, or cut by a more important one meanwhile:
                 // dropped.
-                if (Ms(request.Asked, made) > config.MaxWaitMs || stopping || request.Cut)
+                if ((!request.Preview && Ms(request.Asked, made) > config.MaxWaitMs) || stopping || request.Cut)
                     return;
                 playing = request;
                 // Until it plays (opening a slow device): a long margin, set again once started.
@@ -409,7 +443,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                     {
                         var saved = disk.Get(plan.Key);
                         if (saved != null)
-                            Keep(plan.Key, saved, false);
+                            Keep(plan.Key, saved, null);
                         else
                             Fetch(plan);
                     }
@@ -475,7 +509,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                         var clip = plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None);
                         if (clip != null)
                             Usage.Sent(plan.Provider, plan.Synthesis.Text, false);
-                        return Keep(plan.Key, clip, true);
+                        return Keep(plan.Key, clip, Info(plan.Provider, plan.Synthesis.Voice, plan.Synthesis.Text));
                     }
                     finally
                     {
@@ -536,7 +570,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                             if (clip != null)
                             {
                                 Usage.Sent(provider, x.spoken, true);
-                                disk.Put(x.key, clip);
+                                disk.Put(x.key, clip, Info(provider, voice, x.spoken));
                             }
                             Interlocked.Exchange(ref failures, 0);
                         }
@@ -573,27 +607,33 @@ namespace RainbowMage.OverlayPlugin.Tts
                 return kept;
             }
             if (!plan.Provider.IsSlow)
-                return Keep(plan.Key, plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None), false);
+                return Keep(plan.Key, plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None), null);
 
             kept = disk.Get(plan.Key);
             if (kept != null)
             {
                 request.FromCache = true;
                 Usage.Kept(plan.Provider);
-                return Keep(plan.Key, kept, false);
+                return Keep(plan.Key, kept, null);
             }
             // Slow: not waited for longer than the fallback time; when late it is kept for next time.
+            // The preview waits for it (that is what is being tried) and says why when it fails.
             var fetch = Fetch(plan);
             bool inTime;
             try
             {
-                inTime = fetch.Wait(Math.Max(50, config.FallbackMs));
+                inTime = fetch.Wait(request.Preview ? 60000 : Math.Max(50, config.FallbackMs));
             }
             catch (AggregateException e)
             {
                 request.Error = $"{plan.Provider.Name}: {e.GetBaseException().Message}";
                 LogError(request.Error);
-                return WindowsInstead(request, plan.Synthesis.Lang);
+                return request.Preview ? null : WindowsInstead(request, plan.Synthesis.Lang);
+            }
+            if (request.Preview && !inTime)
+            {
+                request.Error = $"{plan.Provider.Name}: no answer in 60 s";
+                return null;
             }
             if (inTime && fetch.Result != null)
                 return fetch.Result;
@@ -615,7 +655,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             request.FellBack = true;
             var voice = VoiceFor(windows, lang);
             string key = $"{windows.Id}||{voice?.Id}|{config.Rate}|{request.Spoken}";
-            return FromMemory(key) ?? Keep(key, windows.Synthesize(request.Spoken, voice, config.Rate), false);
+            return FromMemory(key) ?? Keep(key, windows.Synthesize(request.Spoken, voice, config.Rate), null);
         }
 
         private TtsClip FromMemory(string key)
@@ -631,15 +671,15 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         // Kept at the output's rate, so playing it again is only mixing (and on disk if asked).
-        private TtsClip Keep(string key, TtsClip clip, bool onDisk)
+        private TtsClip Keep(string key, TtsClip clip, TtsCacheInfo toDisk)
         {
             if (clip == null)
                 return null;
             // Written off the caller's thread: an alert plays before its file is saved.
-            if (onDisk)
+            if (toDisk != null)
             {
-                var toDisk = clip;
-                ThreadPool.QueueUserWorkItem(_ => disk.Put(key, toDisk));
+                var saved = clip;
+                ThreadPool.QueueUserWorkItem(_ => disk.Put(key, saved, toDisk));
             }
             int rate = player.MixRate;
             if (rate > 0 && rate != clip.SampleRate)
@@ -750,6 +790,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             public string Error;
             // A more important alert came while it was made or started.
             public bool Cut;
+            // The settings' preview: the chosen voice itself, however long it takes.
+            public bool Preview => Source == "preview";
         }
     }
 

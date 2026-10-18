@@ -296,6 +296,9 @@ namespace RainbowMage.OverlayPlugin
                                     // If OverlayPlugin is placed above the FFXIV plugin, it won't be available in the first
                                     // phase but it'll be loaded by the time we enter the second phase.
                                     _container.Register(new FFXIVRepository(_container));
+                                    // Fork: the zone, for what the TTS keeps made speech with.
+                                    if (_container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.TtsService ttsZone))
+                                        ttsZone.WatchZone(_container.Resolve<FFXIVRepository>());
                                     _container.Register(new NetworkParser(_container));
                                     _container.Register(new TriggIntegration(_container));
                                     _container.Register(new FFXIVCustomLogLines(_container));

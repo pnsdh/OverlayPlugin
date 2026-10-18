@@ -21,6 +21,8 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
         public string Id => "supertonic";
         public string Name => Ko ? "Supertonic (이 PC에서, 무료, 내려받기 필요)" : "Supertonic (on this PC, free, download needed)";
         public bool IsSlow => true;
+        public const double MinSpeed = 0.9;
+        public const double MaxSpeed = 1.5;
         // One text at a time: it runs on the CPU beside the game.
         public int Parallel => 1;
 
@@ -28,8 +30,8 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
         {
             new TtsField { Key = "voice", Label = "Voice", LabelKo = "목소리", Kind = TtsFieldKind.Choice, Default = "F1", Choices = SupertonicModel.Voices,
                 Hint = "F: female, M: male", HintKo = "F: 여성, M: 남성" },
-            new TtsField { Key = "steps", Label = "Quality (steps)", LabelKo = "품질 (단계 수)", Kind = TtsFieldKind.Choice, Default = "5", Choices = new[] { "3", "5", "8", "12" },
-                Hint = "More: better, slower", HintKo = "많을수록 좋지만 느림" },
+            new TtsField { Key = "steps", Label = "Quality (steps)", LabelKo = "품질 (단계 수)", Kind = TtsFieldKind.Choice, Default = "8", Choices = new[] { "3", "5", "8", "12" },
+                Hint = "More: better, slower (below 8 it may skip words, slow speeds more so)", HintKo = "많을수록 좋지만 느림 (8보다 낮으면 낱말을 건너뛸 수 있음, 느린 속도일수록)" },
             // Only how fast: the speech is the same, so made speech is kept when it changes.
             new TtsField { Key = "threads", Label = "CPU threads", LabelKo = "CPU 스레드", Kind = TtsFieldKind.Choice, Default = "2", Choices = new[] { "1", "2", "4" },
                 Hint = "Fewer: lighter beside the game", HintKo = "적을수록 게임에 부담이 적음", NotInKey = true },
@@ -65,7 +67,9 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             try
             {
                 int.TryParse(request.Settings["steps"], out int steps);
-                var samples = loaded.Engine.Synthesize(request.Text, request.Lang ?? "ko", request.Settings["voice"], Math.Max(1, steps), (float)(1.05 * request.Speed));
+                // Its model speaks well only between 0.9 and 1.5 times its own speed (slower skips words).
+                var speed = (float)Math.Max(MinSpeed, Math.Min(MaxSpeed, 1.05 * request.Speed));
+                var samples = loaded.Engine.Synthesize(request.Text, request.Lang ?? "ko", request.Settings["voice"], Math.Max(1, steps), speed);
                 return new TtsClip(samples, loaded.Engine.SampleRate);
             }
             finally
