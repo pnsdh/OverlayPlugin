@@ -59,6 +59,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             service.Prepared += OnPrepared;
             service.Spoken += OnSpoken;
             service.VolumeChanged += OnVolumeChanged;
+            service.PausedChanged += OnUsageChanged;
             ownerTimer = new Timer { Interval = 2000 };
             ownerTimer.Tick += (o, e) => ShowOwner();
             VisibleChanged += (o, e) =>
@@ -176,6 +177,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             network.Controls.Add(Hint(T("Not for the preview below, which waits for the voice itself.", "아래 미리 듣기에는 쓰지 않습니다 (그 목소리 자체를 기다림).")));
             network.Controls.Add(Check(T("Make ahead the alerts cactbot sends on entering a zone (so the first time is quick too; a paid service charges each once)",
                 "캑봇이 지역에 들어갈 때 보내 주는 알림 문장을 미리 만들어 두기 (처음 나오는 알림도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => { config.PrepareAhead = v; if (!v) service.CancelPrepare(); }));
+            network.Controls.Add(Hint(T("A paid service makes all of a zone's alerts the first time (often hundreds of texts, thousands of characters). Made once, kept for good; but a small free allowance (ElevenLabs' free plan: 10,000 characters a month; Gemini's free tier: requests a day) can be gone in a few zones. Set a monthly limit under Made speech and usage. When a service says it is over its limit, it is left alone for a while and Windows' voice reads.",
+                "유료 서비스는 지역에 처음 들어갈 때 그 지역 알림 전부(보통 수백 문장, 수천 자)를 만듭니다. 한 번 만든 음성은 계속 쓰지만, 무료 사용량이 적은 서비스(ElevenLabs 무료 플랜 월 1만 자, Gemini 무료 등급의 하루 요청 수)는 몇 지역 만에 다 쓸 수 있습니다. 만든 음성·사용량 탭에서 월 한도를 정해 두세요. 서비스가 한도를 넘었다고 답하면 한동안 보내지 않고 Windows 음성으로 읽습니다.")));
             localPrepare = Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
                 "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); });
             network.Controls.Add(localPrepare);
@@ -579,6 +582,9 @@ namespace RainbowMage.OverlayPlugin.Tts
             });
             var lines = new Label { AutoSize = true, MaximumSize = new Size(620, 0), Margin = new Padding(3, 0, 3, 6) };
             usagePanel.Controls.Add(lines);
+            var resume = Button(T("Try the service again now", "지금 다시 보내 보기"), () => service.Resume(provider));
+            resume.Visible = false;
+            usagePanel.Controls.Add(resume);
             refreshUsage = () =>
             {
                 if (lines.IsDisposed)
@@ -595,6 +601,10 @@ namespace RainbowMage.OverlayPlugin.Tts
                 if (u.MonthlyLimit > 0)
                     text += "\n" + T($"Limit: {u.Chars:N0} of {u.MonthlyLimit:N0} characters this month{(u.Chars >= u.MonthlyLimit ? " - reached, Windows' voice reads" : "")}",
                         $"한도: 이번 달 {u.Chars:N0} / {u.MonthlyLimit:N0}자{(u.Chars >= u.MonthlyLimit ? " · 닿음, Windows 음성으로 읽는 중" : "")}");
+                var pause = service.PausedFor(provider);
+                if (pause != null)
+                    text += "\n" + TtsService.PausedText(provider, pause.Value);
+                resume.Visible = pause != null;
                 lines.Text = text;
             };
             refreshUsage();
@@ -979,7 +989,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 if (IsDisposed)
                     return;
-                prepared.Text = total == 0 ? "" : T($"Made ahead for this zone: {done} of {total}", $"이 지역 알림 미리 만들기: {done}/{total}");
+                var last = service.LastPrepare;
+                string size = last.Billed
+                    ? T($" (about {last.Chars:N0} characters, counted as usage)", $" (약 {last.Chars:N0}자, 사용량에 잡힘)")
+                    : "";
+                prepared.Text = total == 0 ? "" : T($"Made ahead for this zone: {done} of {total}", $"이 지역 알림 미리 만들기: {done}/{total}") + size;
             }
             if (!IsHandleCreated)
                 return;
@@ -1089,6 +1103,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 Application.RemoveMessageFilter(wheelGuard);
                 service.Spoken -= OnSpoken;
                 service.VolumeChanged -= OnVolumeChanged;
+                service.PausedChanged -= OnUsageChanged;
                 service.Prepared -= OnPrepared;
                 service.Usage.Changed -= OnUsageChanged;
                 downloading?.Cancel();

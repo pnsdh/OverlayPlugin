@@ -141,6 +141,15 @@ static class Program
                 string body = new StreamReader(ctx.Request.InputStream).ReadToEnd();
                 var json = Newtonsoft.Json.Linq.JObject.Parse(body);
                 string input = (string)json["input"];
+                if (ctx.Request.Headers["Authorization"] == "Bearer limited-key")
+                {
+                    ctx.Response.StatusCode = 429;
+                    ctx.Response.Headers["Retry-After"] = "30";
+                    var err = System.Text.Encoding.UTF8.GetBytes("{\"error\":{\"message\":\"Rate limit reached\"}}");
+                    ctx.Response.OutputStream.Write(err, 0, err.Length);
+                    ctx.Response.Close();
+                    continue;
+                }
                 if (ctx.Request.Headers["Authorization"] != "Bearer good-key")
                 {
                     ctx.Response.StatusCode = 401;
@@ -254,15 +263,26 @@ static class Program
         config.ProviderSettings["openai"]["key"] = TtsSecrets.Protect("bad-key");
         tts2.ConfigChanged();
         Show("bad key", Say("새 문장"));
+        // Over the limit: paused (no more requests, Windows' voice at once, no fetching ahead),
+        // asked again after Resume.
+        config.ProviderSettings["openai"]["key"] = TtsSecrets.Protect("limited-key");
+        tts2.ConfigChanged();
+        Show("over the limit (429)", Say("한도 문장 하나"));
+        int beforeLimit = requests;
+        Show("while paused", Say("한도 문장 둘"));
+        tts2.Prepare(new[] { "한도 미리 하나", "한도 미리 둘" }, "ko");
+        Thread.Sleep(500);
+        var pause = tts2.PausedFor(tts2.Provider);
+        Console.WriteLine($"  paused: {(pause == null ? "FAIL: not paused" : $"{(pause.Value.Until - DateTime.Now).TotalSeconds:0} s")}, requests meanwhile: {requests - beforeLimit}{(requests - beforeLimit == 0 ? "" : " FAIL")}");
+        tts2.Resume(tts2.Provider);
+        Show("after trying again", Say("한도 문장 셋"));
+        Console.WriteLine($"  requests after trying again: {requests - beforeLimit}{(requests - beforeLimit == 1 ? "" : " FAIL")}");
         tts2.Dispose();
         listener.Stop();
         Console.WriteLine($"  disk cache: {cacheDir}");
         return 0;
     }
 
-    // Supertonic end to end: the download (each file checked), loading, then Korean alerts: how
-    // long each takes (first and again), how long the speech is, whether it is sound (not silence
-    // or NaN), and the process' memory.  The download is deleted afterwards unless --keep.
     // Every network service's request with its options set, answered here (a short silence in
     // the shape each one answers in), so the bodies can be checked against the services' docs.
     static int RequestsTest()
@@ -343,6 +363,9 @@ static class Program
         return failed;
     }
 
+    // Supertonic end to end: the download (each file checked), loading, then Korean alerts: how
+    // long each takes (first and again), how long the speech is, whether it is sound (not silence
+    // or NaN), and the process' memory.  The download is deleted afterwards unless --keep.
     static int SupertonicTest(bool keep)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;

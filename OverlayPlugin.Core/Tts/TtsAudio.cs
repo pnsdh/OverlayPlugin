@@ -115,9 +115,26 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 var bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
                 if (!response.IsSuccessStatusCode)
-                    throw new HttpRequestException($"{(int)response.StatusCode} {response.ReasonPhrase}: {TtsAudio.Snippet(bytes)}");
+                {
+                    var retry = response.Headers.RetryAfter;
+                    TimeSpan? after = retry?.Delta ?? (retry?.Date != null ? retry.Date.Value - DateTimeOffset.UtcNow : (TimeSpan?)null);
+                    throw new TtsHttpException((int)response.StatusCode, after, $"{(int)response.StatusCode} {response.ReasonPhrase}: {TtsAudio.Snippet(bytes)}");
+                }
                 return bytes;
             }
+        }
+    }
+
+    // A service's refusal: its status and, if it said so, when to ask again.
+    public class TtsHttpException : HttpRequestException
+    {
+        public int Status { get; }
+        public TimeSpan? RetryAfter { get; }
+
+        public TtsHttpException(int status, TimeSpan? retryAfter, string message) : base(message)
+        {
+            Status = status;
+            RetryAfter = retryAfter;
         }
     }
 }

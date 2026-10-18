@@ -50,7 +50,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         // The same for a voice made on this PC (Supertonic): off unless asked for, as it would take
         // the CPU for minutes beside the game (its first time is quick enough anyway).
-        public bool PrepareAheadLocal { get; set; } = false;
+        public bool PrepareAheadLocal { get; set; } = true;
 
         // How much each paid voice was used (see TtsUsage), with the user's price and limit.
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]

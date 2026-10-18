@@ -76,8 +76,15 @@ namespace RainbowMage.OverlayPlugin.Tts
         // Alerts fetched ahead (see Prepare): done of total, for the settings.
         public event Action<int, int> Prepared;
         public (int Done, int Total) PrepareProgress { get; private set; }
+        // The last zone's list: texts to make, their characters, whether the voice is paid for.
+        public (int Count, long Chars, bool Billed) LastPrepare { get; private set; }
         private CancellationTokenSource preparing;
         private const int PrepareMax = 500;
+
+        // Services that answered "too many requests" or "out of quota": not asked again until then
+        // (Windows' voice reads meanwhile), so a limit is neither hammered nor overrun.
+        private readonly Dictionary<string, (DateTime Until, string Reason)> paused = new Dictionary<string, (DateTime, string)>();
+        public event Action PausedChanged;
 
         public TtsService(TinyIoCContainer container, TtsConfig config)
         {
@@ -505,8 +512,11 @@ namespace RainbowMage.OverlayPlugin.Tts
                         var saved = disk.Get(plan.Key);
                         if (saved != null)
                             Keep(plan.Key, saved, null);
-                        else
+                        else if (PausedFor(plan.Provider) == null)
                             Fetch(plan);
+                        // Over its limit: Windows' voice made ahead instead.
+                        else
+                            ahead.Clip = Make(ahead);
                     }
                 }
                 catch (Exception e)
@@ -572,11 +582,17 @@ namespace RainbowMage.OverlayPlugin.Tts
                 {
                     try
                     {
+                        ThrowIfPaused(plan.Provider);
                         Usage.Check(plan.Provider, plan.Synthesis.Text);
                         TtsClip clip = null;
                         try
                         {
                             clip = plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None);
+                        }
+                        catch (Exception e)
+                        {
+                            PauseIfLimited(plan.Provider, e);
+                            throw;
                         }
                         finally
                         {
@@ -610,6 +626,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             // A local model only if asked for: it would take the CPU for minutes beside the game.
             if (provider is ITtsDownloadable && !config.PrepareAheadLocal)
                 return;
+            var pause = PausedFor(provider);
+            if (pause != null)
+            {
+                LogError(PausedText(provider, pause.Value));
+                return;
+            }
             var cancel = (preparing = new CancellationTokenSource()).Token;
             var s = Settings;
             lang = string.IsNullOrEmpty(lang) ? CultureInfo.CurrentUICulture.TwoLetterISOLanguageName : lang;
@@ -620,6 +642,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 .Distinct().Take(PrepareMax).Select(spoken => (spoken, key: KeyFor(provider, s, voice, voice?.Lang ?? lang, spoken, speed)))
                 .Where(x => FromMemory(x.key) == null && !disk.Has(x.key)).ToList();
             int done = 0, failures = 0;
+            LastPrepare = (todo.Count, todo.Sum(x => (long)x.spoken.Length), TtsUsageCounter.Billed(provider));
             PrepareProgress = (0, todo.Count);
             Prepared?.Invoke(0, todo.Count);
             if (todo.Count == 0)
@@ -638,6 +661,11 @@ namespace RainbowMage.OverlayPlugin.Tts
                                 beingMade = fetching.ContainsKey(x.key);
                             if (beingMade || FromMemory(x.key) != null || disk.Has(x.key))
                                 return;
+                            if (PausedFor(provider) != null)
+                            {
+                                state.Stop();
+                                return;
+                            }
                             try
                             {
                                 Usage.Check(provider, x.spoken);
@@ -667,7 +695,12 @@ namespace RainbowMage.OverlayPlugin.Tts
                         }
                         catch (Exception e) when (!(e is OperationCanceledException))
                         {
-                            if (Interlocked.Increment(ref failures) >= 3)
+                            if (PauseIfLimited(provider, e))
+                            {
+                                LogError($"{provider.Name}: fetching ahead stopped: {e.GetBaseException().Message}");
+                                state.Stop();
+                            }
+                            else if (Interlocked.Increment(ref failures) >= 3)
                             {
                                 LogError($"{provider.Name}: fetching ahead stopped: {e.GetBaseException().Message}");
                                 state.Stop();
@@ -705,6 +738,13 @@ namespace RainbowMage.OverlayPlugin.Tts
                 Usage.Kept(plan.Provider);
                 return Keep(plan.Key, kept, null);
             }
+            // Over its limit: not asked (see PauseIfLimited).
+            var pause = PausedFor(plan.Provider);
+            if (pause != null)
+            {
+                request.Error = PausedText(plan.Provider, pause.Value);
+                return request.Preview ? null : WindowsInstead(request, plan.Synthesis.Lang);
+            }
             // Slow: not waited for longer than the fallback time; when late it is kept for next time.
             // The preview waits for it (that is what is being tried) and says why when it fails.
             var fetch = Fetch(plan);
@@ -737,7 +777,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             }
             catch (AggregateException e)
             {
-                request.Error = $"{plan.Provider.Name}: {e.GetBaseException().Message}";
+                var why = e.GetBaseException().Message;
+                request.Error = why.StartsWith(plan.Provider.Name + ": ") ? why : $"{plan.Provider.Name}: {why}";
                 LogError(request.Error);
                 return request.Preview ? null : WindowsInstead(request, plan.Synthesis.Lang);
             }
@@ -818,6 +859,77 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         // The same failure (no network, a bad key) logged once a minute, not for every alert.
+        // Until when a service is paused (none: it can be asked).
+        public (DateTime Until, string Reason)? PausedFor(ITtsProvider provider)
+        {
+            lock (paused)
+            {
+                if (!paused.TryGetValue(provider.Id, out var p))
+                    return null;
+                if (p.Until > DateTime.Now)
+                    return p;
+                paused.Remove(provider.Id);
+            }
+            PausedChanged?.Invoke();
+            return null;
+        }
+
+        // Asked again now (the settings' button).
+        public void Resume(ITtsProvider provider)
+        {
+            lock (paused)
+                paused.Remove(provider.Id);
+            PausedChanged?.Invoke();
+        }
+
+        public static string PausedText(ITtsProvider provider, (DateTime Until, string Reason) p) =>
+            $"{provider.Name}: " + (CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
+                ? $"{p.Reason}. {p.Until:HH:mm}까지 보내지 않고 Windows 음성으로 읽습니다"
+                : $"{p.Reason}. Not asked until {p.Until:HH:mm}: Windows' voice reads meanwhile");
+
+        private void ThrowIfPaused(ITtsProvider provider)
+        {
+            var p = PausedFor(provider);
+            if (p != null)
+                throw new InvalidOperationException(PausedText(provider, p.Value));
+        }
+
+        // "Too many requests" (429): paused as long as the service says (or a minute); out of
+        // quota or credits (402, or a refusal that says quota): for six hours.  True if paused.
+        private bool PauseIfLimited(ITtsProvider provider, Exception e)
+        {
+            if (!(e.GetBaseException() is TtsHttpException http))
+                return false;
+            bool ko = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
+            var message = http.Message.ToLowerInvariant();
+            bool outOfQuota = http.Status == 402 || message.Contains("insufficient_quota") || message.Contains("quota_exceeded") ||
+                ((http.Status == 401 || http.Status == 403) && message.Contains("quota"));
+            TimeSpan wait;
+            string reason;
+            if (outOfQuota)
+            {
+                wait = TimeSpan.FromHours(6);
+                reason = ko ? "사용량이나 크레딧이 다 됨" : "out of quota or credits";
+            }
+            else if (http.Status == 429)
+            {
+                // Gemini says when in its answer ("retryDelay": "41s").
+                var said = System.Text.RegularExpressions.Regex.Match(http.Message, "\"retryDelay\"\\s*:\\s*\"(\\d+)(?:\\.\\d+)?s\"");
+                wait = http.RetryAfter ?? (said.Success ? TimeSpan.FromSeconds(int.Parse(said.Groups[1].Value)) : TimeSpan.FromMinutes(1));
+                wait = TimeSpan.FromSeconds(Math.Max(10, Math.Min(6 * 3600, wait.TotalSeconds)));
+                reason = ko ? "요청이 너무 많음 (한도 초과)" : "too many requests (over the limit)";
+            }
+            else
+            {
+                return false;
+            }
+            lock (paused)
+                paused[provider.Id] = (DateTime.Now + wait, reason);
+            LogError(PausedText(provider, (DateTime.Now + wait, reason)) + $" ({http.Message})");
+            PausedChanged?.Invoke();
+            return true;
+        }
+
         private void LogError(string message)
         {
             lock (loggedErrors)
