@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <LangVersion>latest</LangVersion>
+    <!-- The built plugin (dotnet build of the plugin first); its DLLs are loaded from there. -->
+    <PluginLibs Condition="'$(PluginLibs)' == ''">$(MSBuildThisFileDirectory)..\..\out\Release\libs\</PluginLibs>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="OverlayPlugin.Core"><HintPath>$(PluginLibs)OverlayPlugin.Core.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Microsoft.ML.OnnxRuntime"><HintPath>$(PluginLibs)Microsoft.ML.OnnxRuntime.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>$(PluginLibs)Newtonsoft.Json.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Net.Http" />
+    <Reference Include="OverlayPlugin.Common"><HintPath>$(PluginLibs)OverlayPlugin.Common.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

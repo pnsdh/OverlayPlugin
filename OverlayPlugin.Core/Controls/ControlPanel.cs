@@ -25,6 +25,8 @@ namespace RainbowMage.OverlayPlugin
         IPluginConfig _config;
         Registry _registry;
         TabPage _generalTab, _eventTab;
+        // Fork: the plugin's own TTS (see Tts.TtsService), when it started.
+        TabPage _ttsTab;
         bool logResized = false;
         bool logConnected = false;
 
@@ -69,6 +71,25 @@ namespace RainbowMage.OverlayPlugin
             };
             _eventTab.Controls.Add(new EventSources.BuiltinEventConfigPanel(container));
 
+            if (container.CanResolve<Tts.TtsService>(ResolveOptions.FailUnregisteredOnly))
+            {
+                _ttsTab = new ConfigTabPage
+                {
+                    Name = "TTS",
+                    Text = "",
+                };
+                // Its own failure (a broken config...) only costs the tab, not the plugin.
+                try
+                {
+                    _ttsTab.Controls.Add(new Tts.TtsConfigPanel(container));
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log(LogLevel.Error, $"TTS: settings tab: {ex}");
+                    _ttsTab.Controls.Add(new Label { Text = "TTS: " + ex.Message, Dock = DockStyle.Fill });
+                }
+            }
+
             logBox.Text = Resources.LogNotConnectedError;
             _logger.RegisterListener(AddLogEntry);
             _registry.EventSourceRegistered += (o, e) => Invoke((Action)(() => AddEventSourceTab(o, e)));
@@ -101,6 +122,7 @@ namespace RainbowMage.OverlayPlugin
                 components?.Dispose();
                 _generalTab?.Dispose();
                 _eventTab?.Dispose();
+                _ttsTab?.Dispose();
                 _registry.EventSourceRegistered -= AddEventSourceTab;
                 _logger.ClearListener();
             }
@@ -189,6 +211,8 @@ namespace RainbowMage.OverlayPlugin
             tabControl.TabPages.Clear();
             tabControl.TabPages.Add(_generalTab);
             tabControl.TabPages.Add(_eventTab);
+            if (_ttsTab != null)
+                tabControl.TabPages.Add(_ttsTab);
 
             foreach (var source in _registry.EventSources)
             {

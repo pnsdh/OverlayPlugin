@@ -326,6 +326,10 @@ namespace RainbowMage.OverlayPlugin
 
         public Dictionary<string, JObject> EventSourceConfigs { get; set; }
 
+        // Fork: the plugin's own TTS (see Tts.TtsService).
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public Tts.TtsConfig Tts { get; set; } = new Tts.TtsConfig();
+
         [JsonIgnore]
         private ILogger logger;
 

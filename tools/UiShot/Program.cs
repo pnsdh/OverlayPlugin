@@ -128,6 +128,30 @@ static class Program
             SetProperty(overlay, "Config", overlayConfig);
             return new MiniParseConfigPanel(container, overlay);
         });
+        Shoot("TtsConfigPanel", () =>
+        {
+            if (!container.CanResolve<RainbowMage.OverlayPlugin.Tts.TtsService>())
+                container.Register(new RainbowMage.OverlayPlugin.Tts.TtsService(container, config.Tts));
+            return new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
+        });
+        Shoot("TtsConfigPanel-network", () =>
+        {
+            // As with a service chosen (its fields shown instead of Windows' voices).
+            config.Tts.Provider = "azure";
+            container.Resolve<RainbowMage.OverlayPlugin.Tts.TtsService>().ConfigChanged();
+            var panel = new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
+            config.Tts.Provider = "sapi";
+            return panel;
+        });
+        Shoot("TtsConfigPanel-supertonic", () =>
+        {
+            // A model downloaded on request: download panel, then its settings.
+            config.Tts.Provider = "supertonic";
+            container.Resolve<RainbowMage.OverlayPlugin.Tts.TtsService>().ConfigChanged();
+            var panel = new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
+            config.Tts.Provider = "sapi";
+            return panel;
+        });
         Shoot("WSConfigPanel", () => new WSConfigPanel(container));
         Shoot("BuiltinEventConfigPanel", () =>
         {
@@ -189,6 +213,15 @@ static class Program
             form.CreateControl();
             CreateHandles(control);
             form.PerformLayout();
+            // What each drop-down holds (drawn ones can look empty in the picture).
+            if (Environment.GetEnvironmentVariable("UISHOT_COMBOS") == "1")
+                foreach (var box in All(control).OfType<ComboBox>())
+                {
+                    Console.WriteLine($"  {name} combo: [{box.SelectedIndex}] \"{box.Text}\" ({box.Items.Count} items)");
+                    // A list drawn by the panel itself (e.g. with lines between groups): as opened.
+                    if (box.DrawMode == DrawMode.OwnerDrawFixed && box.Items.Count > 0)
+                        SaveList(box, Path.Combine(outDir, $"{name}.list{box.Items.Count}.png"));
+                }
             var tabs = All(control).OfType<TabControl>().FirstOrDefault();
             if (tabs == null || tabs.TabCount == 0)
             {
@@ -203,6 +236,22 @@ static class Program
                 Save(control, Path.Combine(outDir, $"{name}.{i}-{Safe(tabs.TabPages[i].Text)}.png"));
             }
         }
+    }
+
+    // An owner-drawn drop-down's items, each drawn as the open list draws it.
+    static void SaveList(ComboBox box, string file)
+    {
+        int h = box.ItemHeight;
+        using (var bmp = new Bitmap(box.Width, h * box.Items.Count))
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(SystemColors.Window);
+            var draw = typeof(ComboBox).GetMethod("OnDrawItem", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            for (int i = 0; i < box.Items.Count; i++)
+                draw.Invoke(box, new object[] { new DrawItemEventArgs(g, box.Font, new Rectangle(0, i * h, box.Width, h), i, DrawItemState.None, SystemColors.WindowText, SystemColors.Window) });
+            bmp.Save(file, ImageFormat.Png);
+        }
+        Console.WriteLine($"wrote {file}");
     }
 
     static void Save(Control control, string file)
