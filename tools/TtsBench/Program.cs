@@ -13,6 +13,9 @@ using RainbowMage.OverlayPlugin.Tts;
 //
 // TtsBench.exe [--volume 0-100] [--voice <name>] [--text "..."]
 // TtsBench.exe --requests    what each network service is sent, with every option set (no network)
+// TtsBench.exe --supertonic-speed    Supertonic's speed by threads and quality, with the downloaded
+//     model (only read, never deleted); SUPERTONIC_TEXTS="a|b" for other texts, SUPERTONIC_ALL=1
+//     for every run
 // Needs the plugin built (out\Release\libs).
 static class Program
 {
@@ -33,6 +36,8 @@ static class Program
 
     static int Run(string[] args)
     {
+        if (args.Contains("--supertonic-speed"))
+            return SupertonicSpeed();
         if (args.Contains("--supertonic"))
             return SupertonicTest(args.Contains("--keep"));
         Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -361,6 +366,60 @@ static class Program
         }
         field.SetValue(null, null);
         return failed;
+    }
+
+    // How long Supertonic takes, by threads and quality: loading, the first text after it, then
+    // each text's median of 5.  The downloaded model is only read.
+    // (2026-10-18, Ryzen 5 7500F: 2 threads fastest, 12 slower; DirectML on an RTX 4070 SUPER was
+    // fast only for texts under 4 characters, slower than the CPU above, with ONNX Runtime 1.20.1
+    // and 1.24.4 alike, so the graphics card is not offered.)
+    static int SupertonicSpeed()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        var provider = new RainbowMage.OverlayPlugin.Tts.Supertonic.SupertonicProvider();
+        if (!provider.Ready)
+        {
+            Console.WriteLine($"not downloaded ({provider.Folder}): download it in the settings first");
+            return 1;
+        }
+        RainbowMage.OverlayPlugin.Tts.Supertonic.SupertonicModel.LoadRuntime();
+        var texts = Environment.GetEnvironmentVariable("SUPERTONIC_TEXTS")?.Split('|')
+            ?? new[] { "산개", "보스 뒤로 이동", "보스와 멀리 떨어지기 다음 행동 멈추기, 3번, 탱버 두 번" };
+        Console.WriteLine($"{Environment.ProcessorCount} logical cores");
+        foreach (var threads in new[] { 1, 2, 3, 4, 6, 8, 12 }.Where(n => n <= Environment.ProcessorCount))
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using (var engine = new RainbowMage.OverlayPlugin.Tts.Supertonic.SupertonicEngine(provider.Folder, threads))
+            {
+                long load = sw.ElapsedMilliseconds;
+                sw.Restart();
+                engine.Synthesize("준비", "ko", "F1", 8, 1f);
+                long first = sw.ElapsedMilliseconds;
+                Console.WriteLine($"threads {threads}: load {load} ms, first text {first} ms");
+                foreach (var steps in new[] { 5, 8 })
+                {
+                    var line = new List<string>();
+                    foreach (var text in texts)
+                    {
+                        var times = new List<long>();
+                        float seconds = 0;
+                        for (int i = 0; i < 5; i++)
+                        {
+                            sw.Restart();
+                            var samples = engine.Synthesize(text, "ko", "F1", steps, 1f);
+                            times.Add(sw.ElapsedMilliseconds);
+                            seconds = samples.Length / (float)engine.SampleRate;
+                        }
+                        if (Environment.GetEnvironmentVariable("SUPERTONIC_ALL") == "1")
+                            Console.WriteLine($"    {text}: {string.Join(", ", times)} ms");
+                        times.Sort();
+                        line.Add($"{times[2],4} ms ({seconds:0.0} s speech)");
+                    }
+                    Console.WriteLine($"  quality {steps}: {string.Join("  ", line)}");
+                }
+            }
+        }
+        return 0;
     }
 
     // Supertonic end to end: the download (each file checked), loading, then Korean alerts: how
