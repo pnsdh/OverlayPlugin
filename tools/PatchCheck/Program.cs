@@ -122,7 +122,7 @@ int Regen()
         bool ripMoved = s.Rip && r.RipOffset is int ro && (ro != s.RipOffset || (r.OldRipOffset is int old && old != ro));
         string moved = (offsetMoved ? $" offset {s.Offset} -> {r.Offset}" : "") + (ripMoved ? $" ripOffset {s.RipOffset} -> {r.RipOffset}" : "");
         // Matches whose call targets could not be compared are said in the detail.
-        string unchecked_ = r.Detail.Contains("확인하지 못함") ? $"\n     ! {r.Detail}" : "";
+        string unchecked_ = r.CallTargetUnverified ? $"\n     ! call targets not compared: {r.Detail}" : "";
         if (r.AlreadyMatches && moved == "")
         {
             Console.WriteLine($"same {s.Name}  ({r.ReadField}){unchecked_}");
