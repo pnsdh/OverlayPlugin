@@ -116,9 +116,12 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors
             uint playerId = repository.GetPlayerID();
             if (playerId == 0 || !fromPlugin.TryGetValue(playerId, out var player))
                 return;
+            // An event NPC or object targeted (towns, housing) is no combatant: FFXIV_ACT_Plugin gives
+            // an ID found in neither list and the target memory none, which says nothing of the layout.
             var target = container.Resolve<ITargetMemory>();
-            if (target.IsValid())
-                Check("Target (memory) = player's TargetID", Id(target.GetTargetCombatant()?.ID ?? 0), Id(player.TargetID));
+            uint targetId = Id(player.TargetID);
+            if (target.IsValid() && (targetId == 0 || fromPlugin.ContainsKey(targetId)))
+                Check("Target (memory) = player's TargetID", Id(target.GetTargetCombatant()?.ID ?? 0), targetId);
             var gauge = container.Resolve<IJobGaugeMemory>();
             var g = gauge.IsValid() ? gauge.GetJobGauge() : null;
             if (g != null && g.Job != JobGaugeJob.None)
@@ -145,10 +148,12 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors
             Check("Level", (int)m.Level, p.Level);
             Check("CurrentHP", (uint)m.CurrentHP, p.CurrentHP);
             Check("MaxHP", (uint)m.MaxHP, p.MaxHP);
-            Check("MaxMP", (uint)m.MaxMP, p.MaxMP);
             Check("TargetID", Id(m.TargetID), Id(p.TargetID));
             if (m.Type == ObjectType.PC)
             {
+                // Players only: for a monster without MP (a training dummy...) memory has 0 and
+                // FFXIV_ACT_Plugin a default 10000 (as in its 03 lines).
+                Check("MaxMP", (uint)m.MaxMP, p.MaxMP);
                 Check("WorldID", (uint)m.WorldID, p.WorldID);
                 Check("CurrentWorldID", (uint)m.CurrentWorldID, p.CurrentWorldID);
             }
