@@ -217,8 +217,23 @@ namespace RainbowMage.OverlayPlugin.Tts
     }
 
     // ElevenLabs: many voices (and your own cloned ones); Flash models answer quickly.
-    public class ElevenLabsProvider : RemoteProvider
+    public class ElevenLabsProvider : RemoteProvider, ITtsUsageSource
     {
+        // The subscription's characters used and allowed this period, as ElevenLabs counts them.
+        public string FetchUsage(TtsSettings settings, CancellationToken cancel)
+        {
+            var message = new HttpRequestMessage(HttpMethod.Get, "https://api.elevenlabs.io/v1/user/subscription");
+            message.Headers.Add("xi-api-key", Require(settings, "key", "API key"));
+            var json = JObject.Parse(Encoding.UTF8.GetString(TtsHttp.Send(message, cancel)));
+            long used = (long?)json["character_count"] ?? 0;
+            long limit = (long?)json["character_limit"] ?? 0;
+            var reset = (long?)json["next_character_count_reset_unix"];
+            var resetText = reset.HasValue ? DateTimeOffset.FromUnixTimeSeconds(reset.Value).ToLocalTime().ToString("yyyy-MM-dd") : "?";
+            return CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
+                ? $"ElevenLabs: {used:N0} / {limit:N0}자 사용 ({json["tier"]}), {resetText}에 초기화"
+                : $"ElevenLabs: {used:N0} of {limit:N0} characters used ({json["tier"]}), resets {resetText}";
+        }
+
         public override string Id => "elevenlabs";
         public override string Name => "ElevenLabs";
 

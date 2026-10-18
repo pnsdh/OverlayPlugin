@@ -72,6 +72,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             logger = container.Resolve<ILogger>();
             this.config = config;
             player = new TtsPlayer(logger);
+            Usage = new TtsUsageCounter(config);
             disk = new TtsDiskCache(CacheFolder(), () => Math.Max(0, config.DiskCacheMB) * 1024L * 1024L);
             Supertonic.SupertonicModel.CleanUp();
             AddProvider(windows);
@@ -82,6 +83,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             AddProvider(new ClovaProvider());
             AddProvider(new HttpTemplateProvider());
             AddProvider(supertonic);
+            Usage.Prepare(providers.Values);
             worker = new Thread(Run) { IsBackground = true, Name = "OverlayPlugin TTS" };
             worker.Start();
         }
@@ -101,6 +103,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         public TtsConfig Config => config;
+        public TtsUsageCounter Usage { get; }
         public TtsDiskCache DiskCache => disk;
 
         public IEnumerable<ITtsProvider> Providers => providers.Values;
@@ -468,7 +471,11 @@ namespace RainbowMage.OverlayPlugin.Tts
                 {
                     try
                     {
-                        return Keep(plan.Key, plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None), true);
+                        Usage.Check(plan.Provider, plan.Synthesis.Text);
+                        var clip = plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None);
+                        if (clip != null)
+                            Usage.Sent(plan.Provider, plan.Synthesis.Text, false);
+                        return Keep(plan.Key, clip, true);
                     }
                     finally
                     {
@@ -514,9 +521,23 @@ namespace RainbowMage.OverlayPlugin.Tts
                     {
                         try
                         {
+                            try
+                            {
+                                Usage.Check(provider, x.spoken);
+                            }
+                            catch (InvalidOperationException e)
+                            {
+                                // The monthly limit: no more fetching ahead.
+                                LogError($"{provider.Name}: {e.Message}");
+                                state.Stop();
+                                return;
+                            }
                             var clip = provider.Synthesize(new TtsSynthesis { Text = x.spoken, Voice = voice, Rate = config.Rate, Lang = voice?.Lang ?? lang, Settings = s }, cancel);
                             if (clip != null)
+                            {
+                                Usage.Sent(provider, x.spoken, true);
                                 disk.Put(x.key, clip);
+                            }
                             Interlocked.Exchange(ref failures, 0);
                         }
                         catch (Exception e) when (!(e is OperationCanceledException))
@@ -547,6 +568,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (kept != null)
             {
                 request.FromCache = true;
+                if (plan.Provider.IsSlow)
+                    Usage.Kept(plan.Provider);
                 return kept;
             }
             if (!plan.Provider.IsSlow)
@@ -556,6 +579,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (kept != null)
             {
                 request.FromCache = true;
+                Usage.Kept(plan.Provider);
                 return Keep(plan.Key, kept, false);
             }
             // Slow: not waited for longer than the fallback time; when late it is kept for next time.

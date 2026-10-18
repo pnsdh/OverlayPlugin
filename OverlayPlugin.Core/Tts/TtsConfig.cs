@@ -50,6 +50,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         // the CPU for minutes beside the game (its first time is quick enough anyway).
         public bool PrepareAheadLocal { get; set; } = false;
 
+        // How much each paid voice was used (see TtsUsage), with the user's price and limit.
+        [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public Dictionary<string, TtsUsage> Usage { get; set; } = new Dictionary<string, TtsUsage>();
+
         // Speech from the network kept on disk (megabytes), so an alert is fetched once.
         public int DiskCacheMB { get; set; } = 300;
 
@@ -84,6 +88,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                 if (ProviderSettings[key] == null)
                     ProviderSettings[key] = new Dictionary<string, string>();
             }
+            if (Usage == null)
+                Usage = new Dictionary<string, TtsUsage>();
             if (Replacements == null)
                 Replacements = new List<TtsReplacement>();
             Replacements.RemoveAll(r => r == null);

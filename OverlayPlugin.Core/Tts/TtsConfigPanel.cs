@@ -28,6 +28,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly FlowLayoutPanel providerFields;
         private readonly Label cacheSize;
         private readonly Label prepared;
+        private readonly FlowLayoutPanel usagePanel;
+        private Action refreshUsage;
         private bool loading;
 
         public TtsConfigPanel(TinyIoCContainer container)
@@ -112,6 +114,10 @@ namespace RainbowMage.OverlayPlugin.Tts
                 "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); }));
             prepared = Hint("");
             network.Controls.Add(prepared);
+            // A paid voice's usage (made again with the provider's fields).
+            usagePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
+            network.Controls.Add(usagePanel);
+            service.Usage.Changed += OnUsageChanged;
             service.Prepared += OnPrepared;
             OnPrepared(service.PrepareProgress.Done, service.PrepareProgress.Total);
 
@@ -178,6 +184,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                     ShowCacheSize();
                     OnPrepared(service.PrepareProgress.Done, service.PrepareProgress.Total);
                     refreshDownload?.Invoke();
+                    refreshUsage?.Invoke();
                 }
             };
             ShowOwner();
@@ -226,6 +233,127 @@ namespace RainbowMage.OverlayPlugin.Tts
                     "본인 키를 쓰며 요금도 본인 계정에 나옵니다. 키는 이 Windows 사용자만 풀 수 있게 암호화해 저장합니다.")));
             }
             providerFields.ResumeLayout();
+            ShowUsage();
+            loading = wasLoading;
+        }
+
+        private void OnUsageChanged()
+        {
+            if (IsDisposed || !IsHandleCreated || !Visible)
+                return;
+            BeginInvoke((Action)(() =>
+            {
+                if (!IsDisposed)
+                    refreshUsage?.Invoke();
+            }));
+        }
+
+        // How much the chosen paid voice was used, what it may cost, and its monthly limit.
+        private void ShowUsage()
+        {
+            if (usagePanel == null)
+                return;
+            bool wasLoading = loading;
+            loading = true;
+            foreach (Control c in usagePanel.Controls.Cast<Control>().ToList())
+                c.Dispose();
+            usagePanel.Controls.Clear();
+            refreshUsage = null;
+            var provider = service.Provider;
+            if (!TtsUsageCounter.Billed(provider))
+            {
+                loading = wasLoading;
+                return;
+            }
+            var usage = service.Usage.Get(provider);
+            usagePanel.Controls.Add(new Label
+            {
+                Text = T("Usage of this service (counted here)", "이 서비스 사용량 (여기서 센 것)"),
+                AutoSize = true,
+                Font = new Font(Font, FontStyle.Bold),
+                Margin = new Padding(3, 3, 3, 3),
+            });
+            var lines = new Label { AutoSize = true, MaximumSize = new Size(620, 0), Margin = new Padding(3, 0, 3, 6) };
+            usagePanel.Controls.Add(lines);
+            refreshUsage = () =>
+            {
+                if (lines.IsDisposed)
+                    return;
+                var u = service.Usage.Get(provider);
+                string Money(double? v) => v.HasValue ? v.Value.ToString("0.00", CultureInfo.CurrentCulture) : "";
+                var text = T($"This month ({u.Month}): {u.Chars:N0} characters, {u.Requests:N0} requests ({u.PreparedChars:N0} characters fetched ahead); {u.Saved:N0} times not sent (kept from before)",
+                    $"이번 달 ({u.Month}): {u.Chars:N0}자, 요청 {u.Requests:N0}회 (그중 미리 만들기 {u.PreparedChars:N0}자) · 저장된 음성으로 안 보낸 횟수 {u.Saved:N0}회");
+                text += "\n" + T($"Last month ({(u.LastMonth == "" ? "-" : u.LastMonth)}): {u.LastMonthChars:N0} characters · In all: {u.TotalChars:N0}",
+                    $"지난달 ({(u.LastMonth == "" ? "-" : u.LastMonth)}): {u.LastMonthChars:N0}자 · 누적 {u.TotalChars:N0}자");
+                if (u.PricePerMillion > 0)
+                    text += "\n" + T($"Estimate: this month {Money(u.Cost(u.Chars))}, last month {Money(u.Cost(u.LastMonthChars))}",
+                        $"예상 요금: 이번 달 {Money(u.Cost(u.Chars))}, 지난달 {Money(u.Cost(u.LastMonthChars))}");
+                if (u.MonthlyLimit > 0)
+                    text += "\n" + T($"Limit: {u.Chars:N0} of {u.MonthlyLimit:N0} characters this month{(u.Chars >= u.MonthlyLimit ? " - reached, Windows' voice reads" : "")}",
+                        $"한도: 이번 달 {u.Chars:N0} / {u.MonthlyLimit:N0}자{(u.Chars >= u.MonthlyLimit ? " · 닿음, Windows 음성으로 읽는 중" : "")}");
+                lines.Text = text;
+            };
+            refreshUsage();
+
+            var grid = Grid(usagePanel);
+            var price = new NumericUpDown { Minimum = 0, Maximum = 100000, DecimalPlaces = 2, Increment = 1, Width = 100, Value = (decimal)Math.Max(0, Math.Min(100000, usage.PricePerMillion)) };
+            price.ValueChanged += (o, e) =>
+            {
+                if (loading)
+                    return;
+                service.Usage.Get(provider).PricePerMillion = (double)price.Value;
+                pluginConfig.MarkDirty();
+                refreshUsage?.Invoke();
+            };
+            var priceRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            priceRow.Controls.Add(price);
+            priceRow.Controls.Add(Hint(T("in your currency, from the service's price page; 0: no estimate", "서비스 요금표의 값, 본인 통화로. 0이면 계산 안 함")));
+            Row(grid, T("Price per million characters", "1백만 자당 요금"), priceRow);
+            var limit = new NumericUpDown { Minimum = 0, Maximum = 1000000000, Increment = 10000, ThousandsSeparator = true, Width = 120, Value = Math.Max(0, Math.Min(1000000000, usage.MonthlyLimit)) };
+            limit.ValueChanged += (o, e) =>
+            {
+                if (loading)
+                    return;
+                service.Usage.Get(provider).MonthlyLimit = (long)limit.Value;
+                pluginConfig.MarkDirty();
+                refreshUsage?.Invoke();
+            };
+            var limitRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            limitRow.Controls.Add(limit);
+            limitRow.Controls.Add(Hint(T("characters; past it Windows' voice reads until next month. 0: no limit", "자. 넘으면 다음 달까지 Windows 음성으로 읽음. 0이면 제한 없음")));
+            Row(grid, T("Monthly limit", "월 한도"), limitRow);
+
+            var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
+            buttons.Controls.Add(Button(T("Reset the count", "사용량 초기화"), () =>
+            {
+                service.Usage.Reset(provider);
+                pluginConfig.MarkDirty();
+                refreshUsage?.Invoke();
+            }));
+            if (provider is ITtsUsageSource source)
+            {
+                var result = new Label { AutoSize = true, ForeColor = SystemColors.GrayText, Anchor = AnchorStyles.Left, Margin = new Padding(3, 6, 3, 3) };
+                buttons.Controls.Add(Button(T("Ask the service", "서비스에서 확인"), async () =>
+                {
+                    result.Text = T("asking...", "확인 중...");
+                    try
+                    {
+                        var settings = service.Settings;
+                        var text = await System.Threading.Tasks.Task.Run(() => source.FetchUsage(settings, System.Threading.CancellationToken.None));
+                        if (!result.IsDisposed)
+                            result.Text = text;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!result.IsDisposed)
+                            result.Text = T("failed: ", "실패: ") + ex.GetBaseException().Message;
+                    }
+                }));
+                buttons.Controls.Add(result);
+            }
+            usagePanel.Controls.Add(buttons);
+            usagePanel.Controls.Add(Hint(T("Counted by this plugin from what it sent; the service's own bill is what counts (other apps using the same key are not counted here).",
+                "이 플러그인이 보낸 만큼 센 값입니다. 실제 요금은 서비스 청구 기준이며, 같은 키를 다른 프로그램이 쓴 양은 여기 안 잡힙니다.")));
             loading = wasLoading;
         }
 
@@ -599,6 +727,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 service.Spoken -= OnSpoken;
                 service.Prepared -= OnPrepared;
+                service.Usage.Changed -= OnUsageChanged;
                 downloading?.Cancel();
                 ownerTimer.Dispose();
             }

@@ -208,6 +208,14 @@ static class Program
             var spoken = results.Select(r => r.Spoken).ToList();
             Console.WriteLine($"  cut while made: played [{string.Join(", ", spoken)}] {(spoken.Contains("느림 정보 알림") ? "FAIL: the cut one played" : "ok")}");
         }
+        // What was counted, and the monthly limit stopping the service.
+        var usage = tts2.Usage.Get(tts2.Provider);
+        Console.WriteLine($"  usage: {usage.Chars} chars, {usage.Requests} requests, {usage.PreparedChars} fetched ahead, {usage.Saved} kept ({usage.Month})");
+        usage.PricePerMillion = 16;
+        Console.WriteLine($"  estimate at 16 per million: {usage.Cost(usage.Chars):0.0000}");
+        usage.MonthlyLimit = usage.Chars + 3;
+        Show("past the monthly limit", Say("한도를 넘는 새 문장"));
+        usage.MonthlyLimit = 0;
         config.ProviderSettings["openai"]["key"] = TtsSecrets.Protect("bad-key");
         tts2.ConfigChanged();
         Show("bad key", Say("새 문장"));
