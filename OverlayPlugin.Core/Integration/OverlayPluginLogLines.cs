@@ -219,6 +219,20 @@ namespace RainbowMage.OverlayPlugin
 
             return null;
         }
+        // Fork: where this game version's opcodes come from, for the tech support info: the file
+        // (how many names), the remote copy cached in the config, or nowhere.
+        public string DescribeSource(MachinaRegion region, string version)
+        {
+            int Count(Opcodes opcodes) =>
+                opcodes != null && opcodes.TryGetValue(region, out var byVersion) && byVersion.TryGetValue(version ?? "", out var names) ? names.Count : 0;
+            int file = Count(opcodesFile);
+            int cached = Count(opcodesConfig);
+            var parts = new List<string> { file > 0 ? $"file ({file})" : "not in file" };
+            if (opcodesConfig != null && opcodesConfig.Count > 0)
+                parts.Add(cached > 0 ? $"cached remote ({cached})" : "cached remote (other versions)");
+            return string.Join(", ", parts);
+        }
+
         public IOpcodeConfigEntry this[string name]
         {
             get

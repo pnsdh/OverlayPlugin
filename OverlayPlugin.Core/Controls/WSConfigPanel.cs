@@ -87,6 +87,10 @@ namespace RainbowMage.OverlayPlugin
                 _ngrok.Kill();
         }
 
+        // Fork: the status words in Korean.
+        private static string Status(string en, string ko) =>
+            System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko" ? ko : en;
+
         private void UpdateStatus(object sender, WSServer.StateChangedArgs e)
         {
             startBtn.Enabled = true;
@@ -94,7 +98,7 @@ namespace RainbowMage.OverlayPlugin
 
             if (e.Running)
             {
-                statusLabel.Text = "Running";
+                statusLabel.Text = Status("Running", "실행 중");
                 statusLabel.ForeColor = Color.ForestGreen;
 
                 startBtn.Enabled = false;
@@ -102,12 +106,12 @@ namespace RainbowMage.OverlayPlugin
             }
             else if (e.Failed)
             {
-                statusLabel.Text = "Failed";
+                statusLabel.Text = Status("Failed", "실패");
                 statusLabel.ForeColor = Color.DarkRed;
             }
             else
             {
-                statusLabel.Text = "Stopped";
+                statusLabel.Text = Status("Stopped", "멈춤");
                 statusLabel.ForeColor = Color.Gray;
             }
         }
@@ -117,7 +121,7 @@ namespace RainbowMage.OverlayPlugin
             switch (status)
             {
                 case TunnelStatus.Unknown:
-                    simpStatusLbl.Text = "Unknown";
+                    simpStatusLbl.Text = Status("Unknown", "알 수 없음");
                     simpStatusLbl.ForeColor = Color.Gray;
 
                     simpStartBtn.Enabled = false;
@@ -125,7 +129,7 @@ namespace RainbowMage.OverlayPlugin
                     break;
 
                 case TunnelStatus.Downloading:
-                    simpStatusLbl.Text = "Downloading client...";
+                    simpStatusLbl.Text = Status("Downloading client...", "클라이언트 내려받는 중...");
                     simpStatusLbl.ForeColor = Color.CornflowerBlue;
 
                     simpStartBtn.Enabled = false;
@@ -133,7 +137,7 @@ namespace RainbowMage.OverlayPlugin
                     break;
 
                 case TunnelStatus.Launching:
-                    simpStatusLbl.Text = "Launching...";
+                    simpStatusLbl.Text = Status("Launching...", "시작하는 중...");
                     simpStatusLbl.ForeColor = Color.CornflowerBlue;
 
                     simpStartBtn.Enabled = false;
@@ -141,7 +145,7 @@ namespace RainbowMage.OverlayPlugin
                     break;
 
                 case TunnelStatus.Active:
-                    simpStatusLbl.Text = "Active";
+                    simpStatusLbl.Text = Status("Active", "켜짐");
                     simpStatusLbl.ForeColor = Color.ForestGreen;
 
                     simpStartBtn.Enabled = false;
@@ -149,7 +153,7 @@ namespace RainbowMage.OverlayPlugin
                     break;
 
                 case TunnelStatus.Inactive:
-                    simpStatusLbl.Text = "Inactive";
+                    simpStatusLbl.Text = Status("Inactive", "꺼짐");
                     simpStatusLbl.ForeColor = Color.Gray;
 
                     simpStartBtn.Enabled = true;
@@ -157,7 +161,7 @@ namespace RainbowMage.OverlayPlugin
                     break;
 
                 case TunnelStatus.Error:
-                    simpStatusLbl.Text = "Error";
+                    simpStatusLbl.Text = Status("Error", "오류");
                     simpStatusLbl.ForeColor = Color.DarkRed;
 
                     simpStartBtn.Enabled = true;

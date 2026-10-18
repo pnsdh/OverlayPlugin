@@ -323,4 +323,14 @@ Overlay Plugin에 필요합니다. 지금 설치하시겠습니까?</value>
   <data name="IgnoreUpdateDueToDotGitDirectoryMessage" xml:space="preserve">
     <value>OverlayPlugin 폴더가 로컬 깃 저장소이므로 자동 업데이트를 건너뜁니다.</value>
   </data>
+  <data name="ActUpdateCheckFailed" xml:space="preserve">
+    <value>ACT를 통한 {0} 업데이트 확인에 실패해 GitHub API로 다시 시도합니다.</value>
+  </data>
+  <data name="SharpCompressOutdatedError" xml:space="preserve">
+    <value>지금 불러온 SharpCompress 버전이 오래되었습니다!
+SharpCompress를 쓰는 다른 플러그인(ACTWebSocket 등)보다 OverlayPlugin을 먼저 불러오도록 하세요.</value>
+  </data>
+  <data name="ActUpdateException" xml:space="preserve">
+    <value>ACT를 통한 {0} 업데이트 확인에 실패해 GitHub API로 대신합니다: {1}</value>
+  </data>
 </root>

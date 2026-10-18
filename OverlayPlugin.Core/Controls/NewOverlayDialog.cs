@@ -76,7 +76,32 @@ namespace RainbowMage.OverlayPlugin
             cbType.Visible = false;
             lblTypeDesc.Visible = false;
 
+            FitLabels();
             textBox1.Focus();
+        }
+
+        // Fork: the designer leaves 16 pixels between a label and the field under it, less than a
+        // label's height with larger fonts, which hid the label under the field: everything under a
+        // short gap moves down, and the dialog grows with it (its buttons are anchored to the bottom).
+        private void FitLabels()
+        {
+            int grow = 0;
+            foreach (var (label, field) in new (Control, Control)[] { (label1, textBox1), (lblPreset, cbPreset) })
+            {
+                int short_ = label.Bottom + 2 - field.Top;
+                if (short_ <= 0)
+                    continue;
+                int from = field.Top;
+                foreach (Control c in Controls)
+                {
+                    // Those anchored only to the bottom move when the dialog grows.
+                    if (c.Top >= from && (c.Anchor & (AnchorStyles.Top | AnchorStyles.Bottom)) != AnchorStyles.Bottom)
+                        c.Top += short_;
+                }
+                grow += short_;
+            }
+            if (grow > 0)
+                ClientSize = new Size(ClientSize.Width, ClientSize.Height + grow);
         }
 
         private Dictionary<string, OverlayPreset> PreparePresetCombo(ComboBox cbPreset)

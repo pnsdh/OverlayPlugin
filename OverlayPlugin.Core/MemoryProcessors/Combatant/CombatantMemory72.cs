@@ -256,6 +256,9 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
         protected new unsafe List<EffectEntry> GetEffectEntries(byte* source, ObjectType type, uint mycharID)
         {
             var result = new List<EffectEntry>();
+            // Fork: see CombatantMemory.SkipEffects.
+            if (SkipEffects)
+                return result;
             int maxEffects = (type == ObjectType.PC) ? 30 : 60;
             var size = EffectMemory72.Size * maxEffects;
 

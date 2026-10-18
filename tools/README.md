@@ -6,6 +6,7 @@
 | --- | --- |
 | [RenderBench](RenderBench/README.md) | 렌더러별(CEF CPU·GPU·공유 텍스처, WebView2) CPU 사용량과 실제 화면에 나간 움직임의 매끄러움 측정 |
 | [WebView2Smoke](WebView2Smoke/README.md) | ACT 없이 오버레이 창을 띄워 입력·포커스·클릭 통과·복구 시험 |
+| `UiShot` | 창 없이 설정 화면(일반·이벤트·웹소켓 탭, 오버레이 목록, 오버레이별 설정, 새 오버레이·이름 바꾸기·설정 오류 창)을 한국어·영어로 그려 `UiShot/out/`에 PNG로 저장, 옵션 위치·잘림 확인. `UiShot.exe techsupport [오버레이 추가 수]`는 기술 지원 정보 예시를 만들어 디스코드 글자 수(2000자) 안에 드는지 확인 |
 | [PatchCheck](PatchCheck/README.md) | 게임 패치 대응: OverlayPlugin·cactbot 메모리 시그니처를 새 게임 exe에서 점검(`scan`)하고 다시 만들기(`regen`). ActPluginRepack의 `FFXIV.Signatures` 라이브러리 사용 |
 | `RenderBench/gpu-kill.ps1` | GPU 프로세스를 8번 강제로 꺼도(한컴 업데이터 상황) 버티는지 시험 |
 | `build-install.ps1 -Version <설치본 4자리>` | 빌드 → 릴리즈와 같은 구성으로 묶기 → (ACT가 꺼져 있으면) 설치·해시 대조. `-NoInstall`은 묶기까지만 |

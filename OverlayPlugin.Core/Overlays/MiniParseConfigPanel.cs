@@ -284,7 +284,8 @@ namespace RainbowMage.OverlayPlugin.Overlays
                 nudZoomPercent.Value = percent;
         }
 
-        // Fork: the renderer of this overlay (see OverlayConfigBase.UseWebView2).
+        // Fork: the renderer of this overlay (see OverlayConfigBase.UseWebView2), first on the tab: the
+        // frame rate options below it are for CEF only.
         private void SetupWebView2Option()
         {
             var ko = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
@@ -292,7 +293,7 @@ namespace RainbowMage.OverlayPlugin.Overlays
             var label = new Label
             {
                 Text = ko ? "렌더러" : "Renderer",
-                Location = new Point(label6.Left, tableLayoutPanel4.Bottom + 12),
+                Location = new Point(label6.Left, label6.Top),
                 AutoSize = true,
             };
             var cbUseWebView2 = new CheckBox
@@ -316,17 +317,21 @@ namespace RainbowMage.OverlayPlugin.Overlays
                 Text = !available
                     ? (ko ? "WebView2 런타임을 사용할 수 없습니다: " : "The WebView2 runtime can't be used: ") + HtmlRenderer.Renderer.WebView2Status
                     : ko
-                    ? "엣지 엔진이 모니터 갱신에 맞춰 직접 그려 움직임이 고릅니다. 그래서 위의 프레임 레이트 설정은 쓰이지 않습니다.\n" +
-                      "글 입력칸을 누르면 그동안만 키보드 입력을 받고, 입력칸에서 벗어나면 게임으로 돌려줍니다.\n" +
-                      "오버레이 안에 저장된 데이터(localStorage)는 처음 한 번 CEF에서 가져오고, 이후로는 따로 저장됩니다."
-                    : "Edge draws in step with the display, for even motion, so the frame rate settings above aren't used.\n" +
-                      "Clicking a text field takes keyboard input until the field is left, then gives it back to the game.\n" +
+                    ? "엣지 엔진이 모니터 갱신에 맞춰 그려 움직임이 고릅니다(아래 프레임 레이트 설정은 쓰이지 않음).\n" +
+                      "입력칸을 누르면 그동안만 키보드를 받고, 벗어나면 게임으로 돌려줍니다.\n" +
+                      "오버레이가 저장한 데이터(localStorage)는 처음 한 번 CEF에서 가져온 뒤 따로 저장됩니다."
+                    : "Edge draws in step with the display, for even motion (the frame rate settings below aren't used).\n" +
+                      "Clicking a text field takes keyboard input until it is left, then gives it back to the game.\n" +
                       "Data the overlay stores (local storage) is copied from CEF once, then kept separately.",
                 Location = new Point(nudMaxFrameRate.Left + 2, cbUseWebView2.Bottom + 2),
                 MaximumSize = new Size(tabAdvanced.ClientSize.Width - nudMaxFrameRate.Left - 8, 0),
                 AutoSize = true,
                 ForeColor = SystemColors.GrayText,
             };
+            // What was on the tab moves down below it.
+            int shift = note.Top + note.GetPreferredSize(note.MaximumSize).Height + (nudMaxFrameRate.Top - label6.Top) + 14 - label6.Top;
+            foreach (Control control in tabAdvanced.Controls)
+                control.Top += shift;
             tabAdvanced.Controls.Add(label);
             tabAdvanced.Controls.Add(cbUseWebView2);
             tabAdvanced.Controls.Add(note);

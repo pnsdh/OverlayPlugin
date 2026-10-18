@@ -87,11 +87,12 @@ int Scan()
         string where = string.Join(", ", inAll.Take(3).Select(m =>
         {
             var v = SigValue.Resolve(all.Image, m, s.Offset, s.Rip, s.RipOffset);
-            return $"0x{m.Rva:X} -> {(v.ResolvedRva is int r ? $"0x{r:X} {v.Section ?? "outside any section"}" : v.Error)}{(m.CrossesBoundary() ? " CROSSES 64KB" : "")}";
+            return $"0x{m.Rva:X} -> {(v.ResolvedRva is int r ? $"0x{r:X} {v.Section ?? "outside any section"}" : v.Error)}{(m.MissedByChunkedScan(s.Offset, s.Rip) ? " MISSED BY 64KB READS" : "")}";
         }));
         // The plugins take the first match; cactbot refuses several.  A value outside every section,
-        // or a match the runtime's 64KB reads cut in two, is as bad as none.
-        bool bad = inAll.Count != 1 || inAll.Any(m => m.CrossesBoundary() ||
+        // or a match the runtime's 64KB reads miss (the match and the value it reads must fit in one
+        // read, see FFXIVMemory.SigScan), is as bad as none.
+        bool bad = inAll.Count != 1 || inAll.Any(m => m.MissedByChunkedScan(s.Offset, s.Rip) ||
             SigValue.Resolve(all.Image, m, s.Offset, s.Rip, s.RipOffset).Section == null);
         string level = !used ? "    " : bad ? "FAIL" : "OK  ";
         if (used && bad)
@@ -115,13 +116,24 @@ int Regen()
     foreach (var s in signatures.Where(s => InUse(s, region)))
     {
         var r = SigRegen.Regenerate(oldCode, newCode, SigPattern.HexToPelite(s.Pattern), s.Offset);
-        if (r.AlreadyMatches)
+        // The pattern can still match while the value is read from elsewhere: a moved field (offset),
+        // or an instruction whose immediate grew (e.g. cmp [rip+x],imm8 to imm32: ripOffset 1 to 4).
+        bool offsetMoved = r.Offset is int o && o != s.Offset;
+        bool ripMoved = s.Rip && r.RipOffset is int ro && (ro != s.RipOffset || (r.OldRipOffset is int old && old != ro));
+        string moved = (offsetMoved ? $" offset {s.Offset} -> {r.Offset}" : "") + (ripMoved ? $" ripOffset {s.RipOffset} -> {r.RipOffset}" : "");
+        // Matches whose call targets could not be compared are said in the detail.
+        string unchecked_ = r.CallTargetUnverified ? $"\n     ! call targets not compared: {r.Detail}" : "";
+        if (r.AlreadyMatches && moved == "")
         {
-            Console.WriteLine($"same {s.Name}  ({r.ReadField})");
+            Console.WriteLine($"same {s.Name}  ({r.ReadField}){unchecked_}");
+        }
+        else if (r.AlreadyMatches)
+        {
+            Console.WriteLine($"MOVE {s.Name}  pattern still matches,{moved}  ({r.ReadField})\n     in {s.Source}{unchecked_}");
         }
         else if (r.Pattern != null)
         {
-            Console.WriteLine($"NEW  {s.Name}\n     {SigPattern.PeliteToHex(r.Pattern)} offset {r.Offset} ripOffset {r.RipOffset}  ({r.ReadField})\n     in {s.Source}");
+            Console.WriteLine($"NEW  {s.Name}\n     {SigPattern.PeliteToHex(r.Pattern)} offset {r.Offset} ripOffset {r.RipOffset}{(ripMoved ? $"  (ripOffset was {s.RipOffset}: change the reader too)" : "")}  ({r.ReadField})\n     in {s.Source}{unchecked_}");
         }
         else
         {

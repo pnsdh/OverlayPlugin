@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -26,9 +27,22 @@ namespace RainbowMage.OverlayPlugin.Updater
             _pluginLoader = pluginLoader;
             lnkManual.Text = CefInstaller.GetUrl();
 
+            // Fork: the installer logs from its download thread; the box is written on the UI thread.
+            var ui = SynchronizationContext.Current;
             container.Resolve<ILogger>().RegisterListener((entry) =>
             {
-                logBox.AppendText($"[{entry.Time}] {entry.Level}: {entry.Message}" + Environment.NewLine);
+                var line = $"[{entry.Time}] {entry.Level}: {entry.Message}" + Environment.NewLine;
+                // Posted to the UI thread this was made on (never written from another thread, which
+                // would make the box's window there if it has none yet), dropped once it is gone.
+                void Append()
+                {
+                    if (!logBox.IsDisposed)
+                        logBox.AppendText(line);
+                }
+                if (ui == null || SynchronizationContext.Current == ui)
+                    Append();
+                else
+                    ui.Post(_ => Append(), null);
             });
         }
 

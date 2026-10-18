@@ -4,7 +4,7 @@
             "de-DE": "Der Browser ist abgestürzt! ({0}) Versuche Neustart!",
             "en": "Browser crashed! ({0}) Trying to restart.",
             "fr-FR": "Le navigateur a planté ! ({0}) Redémarrage.",
-            "ko-KR": "Browser crashed! ({0}) 재시작하십시오.",
+            "ko-KR": "브라우저가 비정상 종료되었습니다! ({0}) 다시 시작합니다.",
             "zh-CN": "浏览器崩溃了! ({0}) 正在尝试重新启动。"
         }
     },
@@ -12,6 +12,7 @@
         "errorExplanation.Text": {
             "en": "Failed to load the plugin configuration. This usually happens because the PC wasn't shut down properly which can cause the config file to become corrupted. You can either reset the plugin config or disable OverlayPlugin for now (in the latter case this prompt will reappear the next time you launch ACT).",
             "fr-FR": "Échec du chargement de la configuration du plugin. Cela se produit généralement parce que l'ordinateur n'a pas été éteint correctement, ce qui peut entraîner la corruption du fichier de configuration. Vous pouvez soit réinitialiser la configuration du plugin, soit désactiver OverlayPlugin pour l'instant (dans ce dernier cas, cette invite réapparaîtra lors du prochain lancement d'ACT).",
+            "ko-KR": "플러그인 설정을 불러오지 못했습니다. 보통 PC가 제대로 종료되지 않아 설정 파일이 손상되었을 때 생깁니다. 플러그인 설정을 초기화하거나, 지금은 OverlayPlugin을 끌 수 있습니다(끄면 다음에 ACT를 켤 때 이 창이 다시 나타납니다).",
             "zh-CN": "加载插件配置失败, 插件配置可能因 ACT 不正常关闭而损坏, 请重新设置插件。"
         }
     },
@@ -89,11 +90,13 @@
         "btnClearCEFCache.Text": {
             "en": "Clear CEF Cache on Restart",
             "fr-FR": "Vider le cache CEF au démarrage",
+            "ko-KR": "다음 시작 때 CEF 캐시 지우기",
             "zh-CN": "重启时清除 CEF 缓存"
         },
         "btnClipboardTechSupport.Text": {
             "en": "Copy Tech Support Info to Clipboard",
             "fr-FR": "Copier les informations techniques",
+            "ko-KR": "기술 지원 정보 복사",
             "zh-CN": "复制技术支持信息到剪贴板"
         },
         "btnUpdateCheck.Text": {
@@ -156,7 +159,7 @@
             "zh-CN": "温馨提示: "
         },
         "lnkGithubRepo.Text": {
-            "en": "https://github.com/OverlayPlugin/OverlayPlugin"
+            "en": "https://github.com/pnsdh/OverlayPlugin"
         }
     },
     "OverlayPlugin.Core/Controls/NewOverlayDialog": {
@@ -229,7 +232,7 @@
             "de-DE": "Overlay umbenennen",
             "en": "Rename Overlay",
             "fr-FR": "Renommer l'overlay",
-            "ko-KR": "이름 바꾸기",
+            "ko-KR": "오버레이 이름 바꾸기",
             "zh-CN": "重命名悬浮窗"
         },
         "btnCancel.Text": {
@@ -361,6 +364,7 @@
         "simpStatusLbl.Text": {
             "en": "Unknown",
             "fr-FR": "Inconnu",
+            "ko-KR": "알 수 없음",
             "zh-CN": "未知"
         },
         "simpStopBtn.Text": {
@@ -403,6 +407,7 @@
         "tokenLabel.Text": {
             "en": "Token:",
             "fr-FR": "Jeton :",
+            "ko-KR": "토큰:",
             "zh-CN": "令牌:"
         },
         "tunnelPage.Text": {
@@ -454,7 +459,7 @@
             "en": "Update DPS during log import",
             "fr-FR": "Mettre à jour le DPS pendant l'import du log",
             "ja-JP": "ログのインポート中にDPSを更新する",
-            "ko-KR": "로그 가져 오기(import) 중에 DPS를 업데이트",
+            "ko-KR": "로그 가져오기 중에도 DPS 갱신",
             "zh-CN": "在导入日志时刷新 DPS 数据"
         },
         "label5.Text": {
@@ -1055,6 +1060,7 @@
         "ClearCacheRestart": {
             "en": "Please restart ACT to clear the CEF cache",
             "fr-FR": "Veuillez redémarrer ACT pour effacer le cache CEF",
+            "ko-KR": "CEF 캐시를 지우려면 ACT를 다시 시작하세요.",
             "zh-CN": "请重启 ACT 以清除 CEF 缓存"
         },
         "CustomPresetLabel": {
@@ -1082,6 +1088,7 @@
         "ErrorCouldNotLoadReservedLogLines": {
             "en": "FFXIVCustomLogLines: Failed to load reserved log line: {0}",
             "fr-FR": "FFXIVCustomLogLines: Échec du chargement de la ligne du log réservé : {0}",
+            "ko-KR": "FFXIVCustomLogLines: 예약된 로그 줄을 불러오지 못했습니다: {0}",
             "zh-CN": "FFXIV 自定义日志行: 加载保留日志行失败。{0}"
         },
         "ErrorOverlayNameEmpty": {
@@ -1200,6 +1207,7 @@
             "#comment": "This error appears in the log box when it wasn't connected to the overlay log. This should never happen and indicates that something went really wrong during plugin startup.",
             "en": "ERROR: Log not connected.",
             "fr-FR": "Erreur : Log non connecté",
+            "ko-KR": "오류: 로그가 연결되지 않았습니다.",
             "zh-CN": "错误: 未连接到日志。"
         },
         "MapESMiniParse": {
@@ -1361,6 +1369,7 @@
             "de-DE": "Ereignisquelle",
             "en": "Event Source",
             "fr-FR": "Source de l'événement",
+            "ko-KR": "이벤트 소스",
             "zh-CN": "事件源"
         },
         "UnregisterHotkeyError": {
@@ -1382,6 +1391,7 @@
             "de-DE": "<h1>Es Funktioniert!</h1>\n        <p>\n            Wenn einer dieser Links mit dem Präfix &quot;Lokal:&quot; angezeigt wird und nicht angeklickt werden kann, liegt dies daran,\n            dass in diesem Overlays lokale Dateien angezeigt werden und Webbrowser es Websiten nicht erlauben, Links zu lokalen Dateien zu erstellen.\n        </p>\n        <p>\n            Kopiere den Link und füge ihn in der Adressleiste ein.\n        </p>",
             "en": "<h1>It Works!</h1>\n        <p>\n            If any of these links are displayed with a &quot;Local:&quot; prefix and not clickable then that's because\n            those overlays display local files and web browsers don't allow web sites to link to local files.\n        </p>\n        <p>\n            You'll have to copy &amp; paste that link into your address bar.\n        </p>",
             "fr-FR": "<h1>Ca fonctionne !</h1>\n        <p>\n             Si l'un de ces liens est affich&eacute; avec un pr&eacute;fixe &quot;Local:&quot; et qu'il ne peut pas &ecirc;tre cliqu&eacute;,\n            c'est que ces overlays affichent des fichiers locaux et que les navigateurs Web n'autorisent pas les sites Web &agrave; cr&eacute;er des liens vers des fichiers locaux.\n        </p>\n        <p>\n            Vous devrez copier et coller ce lien dans votre barre d'adresse\n        </p>",
+            "ko-KR": "<h1>작동 중입니다!</h1>\n        <p>\n            아래 링크 중 앞에 &quot;Local:&quot;이 붙고 눌리지 않는 것은 로컬 파일을 보여 주는 오버레이이기 때문입니다.\n            웹 브라우저는 웹 사이트가 로컬 파일로 연결하는 것을 막습니다.\n        </p>\n        <p>\n            그런 링크는 주소창에 복사해 붙여 넣으세요.\n        </p>",
             "zh-CN": "<h1>启动成功！</h1>\n        <p>\n            如果这些链接中有任何一个以 “Local:” 开头显示且不可点击, 那是因为\n            这些悬浮窗正在调用本地文件, 并且网页浏览器不允许网站链接到本地文件。\n        </p>\n        <p>\n            你必须复制并粘贴到你的地址栏中。\n        </p>"
         },
         "WSInvalidDataRecv": {
@@ -1527,6 +1537,7 @@
         "tabPage3.Text": {
             "en": "Log",
             "fr-FR": "Log :",
+            "ko-KR": "로그",
             "zh-CN": "日志"
         }
     },
@@ -1560,6 +1571,7 @@
             "en": "Update check for {0} through ACT failed, retrying with GitHub API.",
             "fr-FR": "La vérification de {0} via ACT a échoué. Nouvel essai avec l'API GitHub",
             "ja-JP": "ACTでの {0} のアップデートチェックが失敗しました. GitHub API をリトライします.",
+            "ko-KR": "ACT를 통한 {0} 업데이트 확인에 실패해 GitHub API로 다시 시도합니다.",
             "zh-CN": "通过 ACT 检查 {0} 的更新失败, 正在调用 GitHub API 重试。"
         },
         "ActUpdateException": {
@@ -1568,6 +1580,7 @@
             "en": "ACT Update check for {0} failed, falling back to GitHub API: {1}",
             "fr-FR": "La vérification de la mise à jour ACT {0} a échoué, retour sur l'API GitHub : {1}",
             "ja-JP": "ACTでの {0} のアップデートチェックが失敗しました. GitHub API に戻ります: {1}",
+            "ko-KR": "ACT를 통한 {0} 업데이트 확인에 실패해 GitHub API로 대신합니다: {1}",
             "zh-CN": "通过 ACT 检查 {0} 的更新失败, 正在回退至 GitHub API。 {1}"
         },
         "CreatingTempDirFailed": {
@@ -1858,6 +1871,7 @@
             "en": "The currently loaded version of SharpCompress is outdated!\nMake sure you load OverlayPlugin before any other plugins that also use SharpCompress (like ACTWebSocket).",
             "fr-FR": "La version de SharpCompress actuellement chargée est dépassée !\nSoyez sûr de charger OverlayPlugin avant d'autres plugins qui pourraient également l'utiliser (comme ACTWebSocket)",
             "ja-JP": "現在の SharpCompress のバージョンが古いです!\nSharpCompress を使用する他のプラグインの前に、必ずOverlayPluginをロードしてください.",
+            "ko-KR": "지금 불러온 SharpCompress 버전이 오래되었습니다!\nSharpCompress를 쓰는 다른 플러그인(ACTWebSocket 등)보다 OverlayPlugin을 먼저 불러오도록 하세요.",
             "zh-CN": "当前加载的 SharpCompress 版本过旧!\n请确保先加载 OverlayPlugin, 再加载其他也使用 SharpCompress 的插件 (如ACTWebSocket)。"
         },
         "StatusCancelled": {
@@ -2026,6 +2040,11 @@
         }
     },
     "OverlayPlugin/Resources": {
+        "ActVersionTooOld": {
+            "#comment": "Plugin status (in ACT's plugin list)",
+            "en": "ACT version too old! Requires version {0} or newer",
+            "ko-KR": "ACT 버전이 너무 낮습니다! {0} 이상이 필요합니다"
+        },
         "AssemblyMismatch": {
             "de-DE": "ACT hat versucht, {0} {1} zu laden, das nicht mit Ihrer OverlayPlugin-Version ({2}) übereinstimmt. Abbrechen des Plugin-Ladevorgangs.\n\nBitte stellen Sie sicher, dass das alte OverlayPlugin deaktiviert ist, und starten Sie ACT neu. Behebt dies das Problem nicht, entfernen Sie die oben genannte Datei und alle OverlayPlugin * .dll-, CEF- oder HtmlRenderer.dll-Dateien im selben Verzeichnis.\n ",
             "en": "ACT tried to load {0} {1} which doesn't match your OverlayPlugin version ({2}). Aborting plugin load.\n\nPlease make sure the old OverlayPlugin is disabled and restart ACT. If that doesn't fix the issue, remove the above mentioned file and any OverlayPlugin*.dll, CEF or HtmlRenderer.dll files in the same directory.\n",

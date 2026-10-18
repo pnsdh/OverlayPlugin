@@ -29,6 +29,8 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
         // Fork: set while a list without status effects is read (see GetEffectEntries).
         [ThreadStatic]
         private static bool skipEffects;
+        // For the versions that read status effects their own way (their GetEffectEntries hides this one).
+        protected static bool SkipEffects => skipEffects;
 
         public CombatantMemory(TinyIoCContainer container, string charmapSignature, int combatantSize, int effectSize, int numMemoryCombatants = 421)
         {
