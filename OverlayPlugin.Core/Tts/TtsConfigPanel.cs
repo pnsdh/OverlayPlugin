@@ -120,6 +120,11 @@ namespace RainbowMage.OverlayPlugin.Tts
                 Changed();
                 ShowProviderFields();
             });
+            Grouped(engines, item =>
+            {
+                var p = service.Providers.FirstOrDefault(x => Equals(x.Id, item.Value));
+                return p == null ? 0 : p.Id == "http" ? 2 : TtsUsageCounter.Billed(p) ? 1 : 0;
+            });
             Row(voiceGrid, T("Engine", "엔진"), engines);
             // The chosen engine's own settings (voice, or address, key...), made again when it changes.
             providerFields = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
@@ -1277,6 +1282,30 @@ namespace RainbowMage.OverlayPlugin.Tts
                 pluginConfig.MarkDirty();
             };
             return box;
+        }
+
+        // A line in the open list between groups (free, paid, a request written by hand).
+        private static void Grouped(ComboBox box, Func<Item, int> group)
+        {
+            box.DrawMode = DrawMode.OwnerDrawFixed;
+            box.ItemHeight = box.Font.Height + 6;
+            box.DrawItem += (o, e) =>
+            {
+                e.DrawBackground();
+                if (e.Index < 0 || !(box.Items[e.Index] is Item item))
+                    return;
+                var bounds = e.Bounds;
+                TextRenderer.DrawText(e.Graphics, item.Name, e.Font, new Rectangle(bounds.X + 2, bounds.Y, bounds.Width - 2, bounds.Height), e.ForeColor,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+                // Not in the closed box, only between groups in the list.
+                bool inList = (e.State & DrawItemState.ComboBoxEdit) == 0;
+                if (inList && e.Index > 0 && box.Items[e.Index - 1] is Item before && group(before) != group(item))
+                {
+                    using (var pen = new Pen(SystemColors.ControlDark))
+                        e.Graphics.DrawLine(pen, bounds.Left + 2, bounds.Top, bounds.Right - 2, bounds.Top);
+                }
+                e.DrawFocusRectangle();
+            };
         }
 
         private ComboBox Combo(IEnumerable<Item> items, object value, Action<object> set)
