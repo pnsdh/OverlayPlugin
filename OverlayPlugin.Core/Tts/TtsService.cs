@@ -64,6 +64,15 @@ namespace RainbowMage.OverlayPlugin.Tts
         // For the settings' preview: how the last speech went.
         public event Action<TtsResult> Spoken;
 
+        // The volume of all speech set from outside the settings (cactbot's config).
+        public event Action VolumeChanged;
+
+        public void SetVolume(int volume)
+        {
+            config.Volume = Clamp(volume);
+            VolumeChanged?.Invoke();
+        }
+
         // Alerts fetched ahead (see Prepare): done of total, for the settings.
         public event Action<int, int> Prepared;
         public (int Done, int Total) PrepareProgress { get; private set; }
@@ -257,7 +266,9 @@ namespace RainbowMage.OverlayPlugin.Tts
             disk.Clear();
         }
 
-        public void Speak(string text, TtsSeverity severity, string source, string lang = null)
+        // volume: 0 to 1, the sender's own for this text (cactbot's by how important it is); none:
+        // the volume for ACT's own speech and overlays that send none.
+        public void Speak(string text, TtsSeverity severity, string source, string lang = null, double? volume = null)
         {
             if (string.IsNullOrWhiteSpace(text) || stopping)
                 return;
@@ -266,6 +277,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 Text = text,
                 Severity = severity,
                 Source = source,
+                Gain = volume,
                 Lang = string.IsNullOrEmpty(lang) ? CultureInfo.CurrentUICulture.TwoLetterISOLanguageName : lang,
                 Asked = Stopwatch.GetTimestamp(),
             };
@@ -434,7 +446,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 playingSeconds = clip.Samples.Length / (double)Math.Max(1, clip.SampleRate);
             }
             player.Prepare(config.OutputDevice);
-            var started = player.Play(clip, Volume(request.Severity), () =>
+            var started = player.Play(clip, Volume(request), () =>
             {
                 lock (sync)
                 {
@@ -831,17 +843,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             }
         }
 
-        private float Volume(TtsSeverity severity)
+        private float Volume(Request request)
         {
-            int v;
-            switch (severity)
-            {
-                case TtsSeverity.Alarm: v = config.AlarmVolume; break;
-                case TtsSeverity.Alert: v = config.AlertVolume; break;
-                case TtsSeverity.Info: v = config.InfoVolume; break;
-                default: v = config.OtherVolume; break;
-            }
-            return Clamp(config.Volume) / 100f * Clamp(v) / 100f;
+            float own = request.Preview ? 1f
+                : request.Gain is double gain ? (float)Math.Max(0, Math.Min(1, gain))
+                : Clamp(config.OtherVolume) / 100f;
+            return Clamp(config.Volume) / 100f * own;
         }
 
         private static int Clamp(int v) => Math.Max(0, Math.Min(100, v));
@@ -884,6 +891,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             public TtsSeverity Severity;
             public string Source;
             public string Lang;
+            // The sender's own volume (0 to 1), if it gave one.
+            public double? Gain;
             public long Asked;
             public TtsClip Clip;
             public bool Tried;

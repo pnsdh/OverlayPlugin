@@ -29,11 +29,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         // The old setting (-10 to 10), read from older configs into Speed (see Fix).
         public int Rate { get; set; } = 0;
 
-        // 0 to 100: all speech, then by how important the alert is.
+        // 0 to 100: all speech (cactbot's config shows and sets it too), then ACT's own speech
+        // (custom triggers, other plugins) and overlays that send no volume.  cactbot sends its
+        // own volume for each alert, by how important it is (set in cactbot).
         public int Volume { get; set; } = 100;
-        public int AlarmVolume { get; set; } = 100;
-        public int AlertVolume { get; set; } = 100;
-        public int InfoVolume { get; set; } = 100;
         public int OtherVolume { get; set; } = 100;
 
         // Each provider's own settings (address, key, voice...) by provider and field.  Secrets

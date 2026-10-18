@@ -63,6 +63,20 @@ namespace RainbowMage.OverlayPlugin.EventSources
                 if (msg["query"]?.ToString() == "capabilities")
                     return OwnTts(out _) ? new JObject { ["engine"] = "overlayplugin", ["prepare"] = true } : null;
 
+                // Fork: the volume of all speech, shown (and set, with volume: 0 to 100) in
+                // cactbot's config; whether this plugin reads alerts now (enabled).
+                if (msg["query"]?.ToString() == "volume")
+                {
+                    if (!container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.TtsService service))
+                        return null;
+                    if (msg["volume"] != null && msg["volume"].Type != JTokenType.Null)
+                    {
+                        service.SetVolume((int)Math.Round((double)msg["volume"]));
+                        container.Resolve<IPluginConfig>().MarkDirty();
+                    }
+                    return new JObject { ["volume"] = service.Config.Volume, ["enabled"] = OwnTts(out _) };
+                }
+
                 var text = msg["text"]?.ToString();
                 if (text == null)
                     return null;
@@ -72,7 +86,8 @@ namespace RainbowMage.OverlayPlugin.EventSources
                 // speaks for ACT and the user prefers it (see ActTtsBridge).
                 if (OwnTts(out var tts))
                 {
-                    tts.Speak(text, Tts.TtsSeverityParser.Parse(msg["severity"]?.ToString()), msg["source"]?.ToString() ?? "overlay", msg["lang"]?.ToString());
+                    double? volume = msg["volume"] != null && (msg["volume"].Type == JTokenType.Float || msg["volume"].Type == JTokenType.Integer) ? (double?)msg["volume"] : null;
+                    tts.Speak(text, Tts.TtsSeverityParser.Parse(msg["severity"]?.ToString()), msg["source"]?.ToString() ?? "overlay", msg["lang"]?.ToString(), volume);
                     return null;
                 }
 

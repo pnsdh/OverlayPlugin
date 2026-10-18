@@ -18,6 +18,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly TtsService service;
         private readonly ActTtsBridge bridge;
         private readonly IPluginConfig pluginConfig;
+        private TrackBar masterBar;
         private readonly TtsConfig config;
         private Label owner;
         private Label previewResult;
@@ -57,6 +58,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             service.Usage.Changed += OnUsageChanged;
             service.Prepared += OnPrepared;
             service.Spoken += OnSpoken;
+            service.VolumeChanged += OnVolumeChanged;
             ownerTimer = new Timer { Interval = 2000 };
             ownerTimer.Tick += (o, e) => ShowOwner();
             VisibleChanged += (o, e) =>
@@ -123,11 +125,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             var volume = Section(basic, T("Volume", "볼륨"));
             var volumeGrid = Grid(volume);
             string Percent(int v) => v + "%";
-            Row(volumeGrid, T("All speech", "전체"), Slider(0, 100, config.Volume, v => config.Volume = v, Percent));
-            Row(volumeGrid, T("Alarm (most important)", "경고 (가장 중요)"), Slider(0, 100, config.AlarmVolume, v => config.AlarmVolume = v, Percent));
-            Row(volumeGrid, T("Alert", "주의"), Slider(0, 100, config.AlertVolume, v => config.AlertVolume = v, Percent));
-            Row(volumeGrid, T("Info", "정보"), Slider(0, 100, config.InfoVolume, v => config.InfoVolume = v, Percent));
-            Row(volumeGrid, T("Other (ACT, other plugins)", "기타 (ACT, 다른 플러그인)"), Slider(0, 100, config.OtherVolume, v => config.OtherVolume = v, Percent));
+            var master = Slider(0, 100, config.Volume, v => config.Volume = v, Percent);
+            masterBar = master.Controls.OfType<TrackBar>().First();
+            Row(volumeGrid, T("All speech", "전체"), master);
+            Row(volumeGrid, T("ACT's own (custom triggers, other plugins)", "ACT가 읽는 것 (커스텀 트리거, 다른 플러그인)"), Slider(0, 100, config.OtherVolume, v => config.OtherVolume = v, Percent));
+            volume.Controls.Add(Hint(T("cactbot's alerts: by how important they are in cactbot's config (Raidboss > TTS voice). The volume of all speech is the same one there.",
+                "캑봇 알림은 캑봇 설정(레이드보스 > TTS 음성)에서 경고·주의·안내별로 정합니다. 전체 볼륨은 그곳과 같은 값입니다.")));
 
             var reset = Section(basic, T("Settings", "설정"));
             reset.Controls.Add(Button(T("Reset settings to defaults...", "설정을 기본값으로..."), ResetToDefaults));
@@ -171,8 +174,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             var networkGrid = Grid(network);
             Row(networkGrid, T("Windows' voice instead if not ready within", "이 시간 안에 준비 안 되면 Windows 음성으로 대신 읽기"), Seconds(config.FallbackMs, 0.1m, 5, v => config.FallbackMs = v, 0.1m));
             network.Controls.Add(Hint(T("Not for the preview below, which waits for the voice itself.", "아래 미리 듣기에는 쓰지 않습니다 (그 목소리 자체를 기다림).")));
-            network.Controls.Add(Check(T("On entering a zone, make its alerts ahead (so the first time is quick too; a paid service charges each once)",
-                "지역에 들어가면 그 지역 알림을 미리 만들어 두기 (처음에도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => { config.PrepareAhead = v; if (!v) service.CancelPrepare(); }));
+            network.Controls.Add(Check(T("Make ahead the alerts cactbot sends on entering a zone (so the first time is quick too; a paid service charges each once)",
+                "캑봇이 지역에 들어갈 때 보내 주는 알림 문장을 미리 만들어 두기 (처음 나오는 알림도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => { config.PrepareAhead = v; if (!v) service.CancelPrepare(); }));
             localPrepare = Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
                 "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); });
             network.Controls.Add(localPrepare);
@@ -347,9 +350,6 @@ namespace RainbowMage.OverlayPlugin.Tts
             config.Voice = d.Voice;
             config.Speed = d.Speed;
             config.Volume = d.Volume;
-            config.AlarmVolume = d.AlarmVolume;
-            config.AlertVolume = d.AlertVolume;
-            config.InfoVolume = d.InfoVolume;
             config.OtherVolume = d.OtherVolume;
             config.OutputDevice = d.OutputDevice;
             config.QueueMode = d.QueueMode;
@@ -955,6 +955,22 @@ namespace RainbowMage.OverlayPlugin.Tts
             }));
         }
 
+        // Set in cactbot's config: shown here too.
+        private void OnVolumeChanged()
+        {
+            if (IsDisposed || !IsHandleCreated)
+                return;
+            BeginInvoke((Action)(() =>
+            {
+                if (masterBar == null || masterBar.IsDisposed)
+                    return;
+                bool wasLoading = loading;
+                loading = true;
+                masterBar.Value = Math.Max(masterBar.Minimum, Math.Min(masterBar.Maximum, config.Volume));
+                loading = wasLoading;
+            }));
+        }
+
         private void OnPrepared(int done, int total)
         {
             if (IsDisposed)
@@ -1072,6 +1088,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 Application.RemoveMessageFilter(wheelGuard);
                 service.Spoken -= OnSpoken;
+                service.VolumeChanged -= OnVolumeChanged;
                 service.Prepared -= OnPrepared;
                 service.Usage.Changed -= OnUsageChanged;
                 downloading?.Cancel();
