@@ -29,6 +29,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly Label cacheSize;
         private readonly Label prepared;
         private readonly FlowLayoutPanel usagePanel;
+        private readonly WheelGuard wheelGuard;
         private readonly Control slowSection;
         private readonly Control slowHeader;
         private readonly CheckBox localPrepare;
@@ -45,6 +46,9 @@ namespace RainbowMage.OverlayPlugin.Tts
 
             Dock = DockStyle.Fill;
             AutoScroll = true;
+            // The wheel scrolls the tab, never a value under the pointer (see WheelGuard).
+            wheelGuard = new WheelGuard(this);
+            Application.AddMessageFilter(wheelGuard);
             var root = new TableLayoutPanel
             {
                 ColumnCount = 1,
@@ -739,6 +743,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             if (disposing)
             {
+                Application.RemoveMessageFilter(wheelGuard);
                 service.Spoken -= OnSpoken;
                 service.Prepared -= OnPrepared;
                 service.Usage.Changed -= OnUsageChanged;
@@ -746,6 +751,54 @@ namespace RainbowMage.OverlayPlugin.Tts
                 ownerTimer.Dispose();
             }
             base.Dispose(disposing);
+        }
+
+        // Scrolling the tab with the wheel passes over choice boxes, number boxes and sliders, which
+        // would take the wheel and change their value: over them it scrolls the tab instead (an
+        // opened list still scrolls itself).  Seen before any control gets it, as Windows sends the
+        // wheel to the control under the pointer (or the focused one) and some handle it natively.
+        private class WheelGuard : IMessageFilter
+        {
+            private const int WM_MOUSEWHEEL = 0x020A;
+            private readonly TtsConfigPanel panel;
+
+            public WheelGuard(TtsConfigPanel panel)
+            {
+                this.panel = panel;
+            }
+
+            public bool PreFilterMessage(ref Message m)
+            {
+                if (m.Msg != WM_MOUSEWHEEL || panel.IsDisposed || !panel.Visible)
+                    return false;
+                for (var c = Control.FromChildHandle(m.HWnd); c != null; c = c.Parent)
+                {
+                    if (c == panel)
+                        return false;
+                    if (c is ComboBox combo && combo.DroppedDown)
+                        return false;
+                    if (c is ComboBox || c is NumericUpDown || c is TrackBar)
+                    {
+                        if (!IsInside(c))
+                            return false;
+                        int delta = (short)((long)m.WParam >> 16);
+                        var at = panel.AutoScrollPosition;
+                        panel.AutoScrollPosition = new Point(-at.X, -at.Y - delta);
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            private bool IsInside(Control c)
+            {
+                for (; c != null; c = c.Parent)
+                {
+                    if (c == panel)
+                        return true;
+                }
+                return false;
+            }
         }
 
         // Layout helpers.
