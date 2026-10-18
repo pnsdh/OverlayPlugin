@@ -329,16 +329,24 @@ namespace RainbowMage.OverlayPlugin.Tts
         public override TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel)
         {
             var s = request.Settings;
-            string Fill(string template, bool url) => (template ?? "")
-                .Replace("{text_json}", JsonString(request.Text))
-                .Replace("{text_url}", Uri.EscapeDataString(request.Text))
-                .Replace("{text_xml}", SecurityElement.Escape(request.Text))
-                .Replace("{text}", url ? Uri.EscapeDataString(request.Text) : request.Text)
-                .Replace("{voice}", url ? Uri.EscapeDataString(s["voice"]) : s["voice"])
-                .Replace("{speed}", request.Speed.ToString("0.##", CultureInfo.InvariantCulture))
-                .Replace("{rate}", request.Rate.ToString(CultureInfo.InvariantCulture))
-                .Replace("{lang}", request.Lang ?? "")
-                .Replace("{key}", s["key"]);
+            // In one pass: what is put in (the alert's text) is never searched for placeholders,
+            // so a text with "{key}" in it does not get the key.
+            string Fill(string template, bool url)
+            {
+                var values = new Dictionary<string, string>
+                {
+                    ["text_json"] = JsonString(request.Text),
+                    ["text_url"] = Uri.EscapeDataString(request.Text),
+                    ["text_xml"] = SecurityElement.Escape(request.Text),
+                    ["text"] = url ? Uri.EscapeDataString(request.Text) : request.Text,
+                    ["voice"] = url ? Uri.EscapeDataString(s["voice"]) : s["voice"],
+                    ["speed"] = request.Speed.ToString("0.##", CultureInfo.InvariantCulture),
+                    ["rate"] = request.Rate.ToString(CultureInfo.InvariantCulture),
+                    ["lang"] = request.Lang ?? "",
+                    ["key"] = s["key"],
+                };
+                return System.Text.RegularExpressions.Regex.Replace(template ?? "", @"\{(text_json|text_url|text_xml|text|voice|speed|rate|lang|key)\}", m => values[m.Groups[1].Value]);
+            }
             var method = s["method"] == "GET" ? HttpMethod.Get : HttpMethod.Post;
             var message = new HttpRequestMessage(method, Fill(Require(s, "url", "address"), true));
             if (method == HttpMethod.Post)

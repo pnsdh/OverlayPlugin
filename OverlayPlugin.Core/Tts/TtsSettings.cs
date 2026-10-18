@@ -14,7 +14,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         public TtsSettings(ITtsProvider provider, TtsConfig config)
         {
             values = new Dictionary<string, string>();
-            config.ProviderSettings.TryGetValue(provider.Id, out var saved);
+            Dictionary<string, string> saved = null;
+            config.ProviderSettings?.TryGetValue(provider.Id, out saved);
             foreach (var field in provider.Fields)
             {
                 string value = null;
@@ -29,7 +30,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         // What identifies the speech it makes (for the caches): everything but secrets.
         public string Fingerprint(ITtsProvider provider) =>
-            string.Join("|", provider.Fields.Where(f => f.Kind != TtsFieldKind.Secret).Select(f => this[f.Key]));
+            string.Join("|", provider.Fields.Where(f => f.Kind != TtsFieldKind.Secret && !f.NotInKey).Select(f => this[f.Key]));
     }
 
     // Fork: API keys kept in the plugin config encrypted for this Windows user (DPAPI): the config

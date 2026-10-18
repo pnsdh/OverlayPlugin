@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using NAudio.CoreAudioApi;
+using NAudio.CoreAudioApi.Interfaces;
 using NAudio.Dsp;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
@@ -12,6 +13,10 @@ namespace RainbowMage.OverlayPlugin.Tts
     // Fork: plays speech on one output that stays open while alerts come (opening an audio device
     // costs tens of milliseconds, which would be added to every alert), closed after a while
     // without any.  Clips are mixed in, so one can be cut off at once for a more important one.
+    //
+    // An output is never stopped on its own playback thread (NAudio's Stop joins that thread):
+    // it is taken out under the lock and stopped on the thread pool.  A clip that goes with a
+    // closed output is ended (its finished called), so whoever waits for it is not stuck.
     public class TtsPlayer : IDisposable
     {
         private const int LatencyMs = 40;
@@ -23,12 +28,27 @@ namespace RainbowMage.OverlayPlugin.Tts
         private MixingSampleProvider mixer;
         private string deviceId;
         private DateTime lastUse;
+        private DateTime lastOpenError;
+        private bool disposed;
         private readonly Timer idleTimer;
+        private readonly MMDeviceEnumerator notifications;
+        private readonly DefaultDeviceWatcher watcher;
 
         public TtsPlayer(ILogger logger)
         {
             this.logger = logger;
             idleTimer = new Timer(_ => CloseIfIdle(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+            // "Default device" follows Windows' default output when it changes.
+            try
+            {
+                notifications = new MMDeviceEnumerator();
+                watcher = new DefaultDeviceWatcher(this);
+                notifications.RegisterEndpointNotificationCallback(watcher);
+            }
+            catch (Exception)
+            {
+                notifications = null;
+            }
         }
 
         public int MixRate
@@ -63,6 +83,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             lock (sync)
             {
+                if (disposed)
+                    return;
                 lastUse = DateTime.UtcNow;
                 if (output != null && deviceId == (device ?? ""))
                     return;
@@ -88,21 +110,28 @@ namespace RainbowMage.OverlayPlugin.Tts
                         // A device that is gone: the default, rather than silence.
                         endpoint = endpoint ?? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
                         var mix = endpoint.AudioClient.MixFormat;
-                        mixer = new MixingSampleProvider(WaveFormat.CreateIeeeFloatWaveFormat(mix.SampleRate, Math.Min(2, Math.Max(1, mix.Channels))))
+                        var newMixer = new MixingSampleProvider(WaveFormat.CreateIeeeFloatWaveFormat(mix.SampleRate, Math.Min(2, Math.Max(1, mix.Channels))))
                         {
                             // Silence between clips, so the output keeps running.
                             ReadFully = true,
                         };
-                        output = new WasapiOut(endpoint, AudioClientShareMode.Shared, true, LatencyMs);
-                        output.PlaybackStopped += OnStopped;
-                        output.Init(mixer);
-                        output.Play();
+                        var newOutput = new WasapiOut(endpoint, AudioClientShareMode.Shared, true, LatencyMs);
+                        newOutput.PlaybackStopped += OnStopped;
+                        newOutput.Init(newMixer);
+                        newOutput.Play();
+                        output = newOutput;
+                        mixer = newMixer;
                         deviceId = device ?? "";
                     }
                 }
                 catch (Exception e)
                 {
-                    logger.Log(LogLevel.Warning, $"TTS: could not open the audio output: {e.Message}");
+                    // No device (or a failing one): said once a minute, not for every alert.
+                    if (DateTime.UtcNow - lastOpenError > TimeSpan.FromMinutes(1))
+                    {
+                        lastOpenError = DateTime.UtcNow;
+                        logger.Log(LogLevel.Warning, $"TTS: could not open the audio output: {e.Message}");
+                    }
                     Close();
                 }
             }
@@ -114,7 +143,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             lock (sync)
             {
                 lastUse = DateTime.UtcNow;
-                if (mixer == null)
+                if (mixer == null || disposed)
                     return null;
                 var samples = clip.SampleRate == mixer.WaveFormat.SampleRate ? clip.Samples : Resample(clip, mixer.WaveFormat.SampleRate);
                 var playback = new TtsPlayback(samples, mixer.WaveFormat, volume, finished);
@@ -143,9 +172,10 @@ namespace RainbowMage.OverlayPlugin.Tts
             return result;
         }
 
+        // On NAudio's playback thread, after the device failed (unplugged, format changed...): the
+        // output is only taken out here; opened again with the next alert.
         private void OnStopped(object sender, StoppedEventArgs e)
         {
-            // The device went away or failed: opened again on the next alert.
             if (e.Exception != null)
                 logger.Log(LogLevel.Warning, $"TTS: audio output stopped: {e.Exception.Message}");
             lock (sync)
@@ -159,35 +189,93 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             lock (sync)
             {
-                if (output != null && DateTime.UtcNow - lastUse > IdleClose && mixer.MixerInputs.Count() == 0)
+                if (output != null && DateTime.UtcNow - lastUse > IdleClose && !mixer.MixerInputs.Any())
                     Close();
             }
         }
 
+        // Windows' default output changed: an output on the default is opened again on it.
+        private void DefaultChanged()
+        {
+            lock (sync)
+            {
+                if (output != null && deviceId == "")
+                    Close();
+            }
+        }
+
+        // Under the lock: the output taken out, its clips ended, and it stopped on the thread pool
+        // (never on its own playback thread, which may be the one calling).
         private void Close()
         {
             var o = output;
+            var m = mixer;
             output = null;
             mixer = null;
+            if (m != null)
+            {
+                foreach (var playback in m.MixerInputs.OfType<TtsPlayback>().ToList())
+                    playback.End();
+                m.RemoveAllMixerInputs();
+            }
             if (o != null)
             {
                 o.PlaybackStopped -= OnStopped;
-                try
+                ThreadPool.QueueUserWorkItem(_ =>
                 {
-                    o.Stop();
-                    o.Dispose();
-                }
-                catch (Exception)
-                {
-                }
+                    try
+                    {
+                        o.Stop();
+                        o.Dispose();
+                    }
+                    catch (Exception)
+                    {
+                    }
+                });
             }
         }
 
         public void Dispose()
         {
             idleTimer.Dispose();
+            try
+            {
+                if (notifications != null)
+                {
+                    notifications.UnregisterEndpointNotificationCallback(watcher);
+                    notifications.Dispose();
+                }
+            }
+            catch (Exception)
+            {
+            }
             lock (sync)
+            {
+                disposed = true;
                 Close();
+            }
+        }
+
+        private class DefaultDeviceWatcher : IMMNotificationClient
+        {
+            private readonly TtsPlayer player;
+
+            public DefaultDeviceWatcher(TtsPlayer player)
+            {
+                this.player = player;
+            }
+
+            public void OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId)
+            {
+                // Called by Windows on its own thread: the output is closed elsewhere.
+                if (flow == DataFlow.Render && role == Role.Multimedia)
+                    ThreadPool.QueueUserWorkItem(_ => player.DefaultChanged());
+            }
+
+            public void OnDeviceStateChanged(string deviceId, DeviceState newState) { }
+            public void OnDeviceAdded(string pwstrDeviceId) { }
+            public void OnDeviceRemoved(string deviceId) { }
+            public void OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key) { }
         }
     }
 
@@ -219,6 +307,14 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             if (fadeLeft < 0)
                 fadeLeft = WaveFormat.SampleRate / 200;
+        }
+
+        // Its output closed: over, without playing the rest.
+        public void End()
+        {
+            position = samples.Length;
+            if (Interlocked.Exchange(ref done, 1) == 0)
+                finished?.Invoke();
         }
 
         public int Read(float[] buffer, int offset, int count)

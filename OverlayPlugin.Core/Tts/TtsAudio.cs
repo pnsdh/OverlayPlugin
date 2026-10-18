@@ -93,6 +93,17 @@ namespace RainbowMage.OverlayPlugin.Tts
         // The answer's bytes; a failure as an exception with the service's own message.
         public static byte[] Send(HttpRequestMessage request, System.Threading.CancellationToken cancel)
         {
+            // .NET Framework allows 2 connections per host by default: fetching ahead (2 at a time)
+            // would make a live alert wait for a free one.
+            try
+            {
+                var point = System.Net.ServicePointManager.FindServicePoint(request.RequestUri);
+                if (point.ConnectionLimit < 6)
+                    point.ConnectionLimit = 6;
+            }
+            catch (Exception)
+            {
+            }
             using (var response = Client.SendAsync(request, cancel).GetAwaiter().GetResult())
             {
                 var bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();

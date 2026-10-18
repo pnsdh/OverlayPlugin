@@ -15,6 +15,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly TtsService service;
         private readonly FormActMain.PlayTtsDelegate ours;
         private FormActMain.PlayTtsDelegate original;
+        // ACT's own way of speaking, as first found (kept across a disable and enable of the plugin
+        // in the same ACT: an older bridge's delegate handed back by another plugin is replaced
+        // with this one's, not mistaken for another plugin).
+        private static FormActMain.PlayTtsDelegate actOwn;
 
         public ActTtsBridge(TinyIoCContainer container, TtsService service)
         {
@@ -40,6 +44,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                     return Owner.Unknown;
                 if (IsOurs(current))
                     return Owner.Us;
+                // A disabled bridge's (this plugin before it was enabled again): free to take.
+                if (current.Method.DeclaringType == typeof(ActTtsBridge))
+                    return Owner.Act;
                 return current.Method.DeclaringType == typeof(FormActMain) ? Owner.Act : Owner.OtherPlugin;
             }
         }
@@ -67,7 +74,9 @@ namespace RainbowMage.OverlayPlugin.Tts
             var owner = CurrentOwner;
             if (want && owner == Owner.Act)
             {
-                original = act.PlayTtsMethod;
+                if (act.PlayTtsMethod.Method.DeclaringType == typeof(FormActMain))
+                    actOwn = act.PlayTtsMethod;
+                original = actOwn ?? act.PlayTtsMethod;
                 act.PlayTtsMethod = ours;
                 logger.Log(LogLevel.Info, "TTS: reading ACT's TTS too.");
             }

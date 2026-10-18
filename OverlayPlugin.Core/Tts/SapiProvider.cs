@@ -47,7 +47,15 @@ namespace RainbowMage.OverlayPlugin.Tts
         public TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel) =>
             Synthesize(request.Text, request.Voice, request.Rate);
 
+        private readonly object sync = new object();
+
         public TtsClip Synthesize(string text, TtsVoice voice, int rate)
+        {
+            lock (sync)
+                return SynthesizeLocked(text, voice, rate);
+        }
+
+        private TtsClip SynthesizeLocked(string text, TtsVoice voice, int rate)
         {
             if (synth == null)
                 synth = new SpeechSynthesizer();

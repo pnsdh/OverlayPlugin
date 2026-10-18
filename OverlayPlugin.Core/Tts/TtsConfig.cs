@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Runtime.Serialization;
 using Newtonsoft.Json;
 
 namespace RainbowMage.OverlayPlugin.Tts
@@ -45,6 +46,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         // voice, so even the first time an alert plays at once.
         public bool PrepareAhead { get; set; } = true;
 
+        // The same for a voice made on this PC (Supertonic): off unless asked for, as it would take
+        // the CPU for minutes beside the game (its first time is quick enough anyway).
+        public bool PrepareAheadLocal { get; set; } = false;
+
         // Speech from the network kept on disk (megabytes), so an alert is fetched once.
         public int DiskCacheMB { get; set; } = 300;
 
@@ -67,6 +72,23 @@ namespace RainbowMage.OverlayPlugin.Tts
         // config).
         [JsonProperty(ObjectCreationHandling = ObjectCreationHandling.Replace)]
         public List<TtsReplacement> Replacements { get; set; } = TtsTextProcessor.DefaultReplacements();
+
+        // A config edited by hand (or broken) with null lists: empty ones, rather than errors.
+        [OnDeserialized]
+        internal void Fix(StreamingContext context)
+        {
+            if (ProviderSettings == null)
+                ProviderSettings = new Dictionary<string, Dictionary<string, string>>();
+            if (Replacements == null)
+                Replacements = new List<TtsReplacement>();
+            Replacements.RemoveAll(r => r == null);
+            if (Provider == null)
+                Provider = SapiProvider.ProviderId;
+            if (Voice == null)
+                Voice = "";
+            if (OutputDevice == null)
+                OutputDevice = "";
+        }
     }
 
     public enum TtsQueueMode

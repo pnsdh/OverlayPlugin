@@ -59,9 +59,12 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
 
         private static string RuntimePath => Path.Combine(Folder, "runtime", "onnxruntime.dll");
 
-        // Everything there, at its size (hashes are checked when downloading).
+        // Written when a download ended with every file checked against its hash (and removed
+        // first by a delete): only then is it ready.
+        private static string VerifiedPath => Path.Combine(Folder, "verified-" + Revision.Substring(0, 12));
+
         public static bool Ready =>
-            File.Exists(RuntimePath) &&
+            File.Exists(VerifiedPath) && File.Exists(RuntimePath) &&
             files.All(f => File.Exists(Path.Combine(Folder, f.Path)) && new FileInfo(Path.Combine(Folder, f.Path)).Length == f.Size);
 
         public static long SizeOnDisk()
@@ -89,10 +92,13 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                 progress?.Report((done, total));
             }
 
+            if (File.Exists(VerifiedPath))
+                File.Delete(VerifiedPath);
             foreach (var f in files)
             {
                 var path = Path.Combine(Folder, f.Path);
-                if (File.Exists(path) && new FileInfo(path).Length == f.Size)
+                // Kept from before (a download stopped midway): only if it is the right file.
+                if (File.Exists(path) && new FileInfo(path).Length == f.Size && await Task.Run(() => Sha256(path), cancel) == f.Sha)
                 {
                     Add(f.Size);
                     continue;
@@ -133,6 +139,14 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             {
                 Add(RuntimeZipSize);
             }
+            File.WriteAllText(VerifiedPath, DateTime.UtcNow.ToString("o"));
+        }
+
+        private static string Sha256(string path)
+        {
+            using (var stream = File.OpenRead(path))
+            using (var hash = SHA256.Create())
+                return string.Concat(hash.ComputeHash(stream).Select(x => x.ToString("x2")));
         }
 
         private static async Task Fetch(string url, string path, long size, string sha, Action<long> progress, CancellationToken cancel)
@@ -142,6 +156,11 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             try
             {
                 using (var response = await TtsHttp.LongClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancel))
+                // A read stuck on a dead connection does not see the token: the response is closed
+                // under it (on Stop, or when nothing comes for 30 seconds).
+                using (var stall = new CancellationTokenSource())
+                using (cancel.Register(() => response.Dispose()))
+                using (stall.Token.Register(() => response.Dispose()))
                 {
                     response.EnsureSuccessStatusCode();
                     using (var input = await response.Content.ReadAsStreamAsync())
@@ -150,8 +169,23 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
                     {
                         var buffer = new byte[1 << 16];
                         int read;
-                        while ((read = await input.ReadAsync(buffer, 0, buffer.Length, cancel)) > 0)
+                        while (true)
                         {
+                            stall.CancelAfter(TimeSpan.FromSeconds(30));
+                            try
+                            {
+                                read = await input.ReadAsync(buffer, 0, buffer.Length, cancel);
+                            }
+                            catch (Exception) when (cancel.IsCancellationRequested)
+                            {
+                                throw new OperationCanceledException(cancel);
+                            }
+                            catch (Exception) when (stall.IsCancellationRequested)
+                            {
+                                throw new IOException("no data for 30 seconds");
+                            }
+                            if (read <= 0)
+                                break;
                             await output.WriteAsync(buffer, 0, read, cancel);
                             hash.TransformBlock(buffer, 0, read, null, 0);
                             counted += read;
@@ -181,10 +215,45 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             }
         }
 
+        // Everything removed; the runtime library, if ACT has it loaded, stays until ACT restarts
+        // (removed then, see CleanUp).
         public static void Delete()
         {
-            if (Directory.Exists(Folder))
+            if (!Directory.Exists(Folder))
+                return;
+            if (File.Exists(VerifiedPath))
+                File.Delete(VerifiedPath);
+            foreach (var file in Directory.GetFiles(Folder, "*", SearchOption.AllDirectories))
+            {
+                try
+                {
+                    File.Delete(file);
+                }
+                catch (Exception) when (runtimeLoaded && string.Equals(Path.GetFullPath(file), Path.GetFullPath(RuntimePath), StringComparison.OrdinalIgnoreCase))
+                {
+                }
+            }
+            try
+            {
                 Directory.Delete(Folder, true);
+            }
+            catch (Exception)
+            {
+                // The loaded library's folder.
+            }
+        }
+
+        // At start: what a delete could not remove (the library in use then) goes now.
+        public static void CleanUp()
+        {
+            try
+            {
+                if (Directory.Exists(Folder) && !File.Exists(VerifiedPath) && !Directory.EnumerateFiles(Folder, "*.onnx", SearchOption.AllDirectories).Any() && !runtimeLoaded)
+                    Directory.Delete(Folder, true);
+            }
+            catch (Exception)
+            {
+            }
         }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]

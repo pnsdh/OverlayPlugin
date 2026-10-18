@@ -101,6 +101,19 @@ static class Program
             foreach (var r in results)
                 Console.WriteLine($"  played: {r.Spoken} (playing {r.StartedMs:0.0}ms after asked)");
 
+        // The output changed while a clip plays (it is closed and opened again): speech goes on.
+        Console.WriteLine();
+        Console.WriteLine("== output device changed while playing");
+        lock (results) results.Clear();
+        Say("출력 장치를 바꾸는 동안 읽히는 긴 문장입니다 하나 둘 셋", TtsSeverity.Info);
+        Thread.Sleep(300);
+        config.OutputDevice = "no-such-device";
+        Say("장치 바뀐 뒤 문장", TtsSeverity.Info);
+        Thread.Sleep(2500);
+        lock (results)
+            Console.WriteLine(results.Any(r => r.Spoken == "장치 바뀐 뒤 문장") ? "  ok: the next one played" : "  FAIL: stuck after the output changed");
+        config.OutputDevice = "";
+
         tts.Dispose();
         return RemoteTest(container, volume);
     }
@@ -184,6 +197,17 @@ static class Program
         int before = requests;
         Show("after restart (from disk)", Say("빠른 응답"));
         Console.WriteLine($"  requests to the server for it: {requests - before}");
+        // A more important alert while a slow one is being made: that one is not played.
+        lock (results) results.Clear();
+        tts2.Speak("느림 정보 알림", TtsSeverity.Info, "bench", "ko");
+        Thread.Sleep(200);
+        tts2.Speak("새 경고", TtsSeverity.Alarm, "bench", "ko");
+        Thread.Sleep(3000);
+        lock (results)
+        {
+            var spoken = results.Select(r => r.Spoken).ToList();
+            Console.WriteLine($"  cut while made: played [{string.Join(", ", spoken)}] {(spoken.Contains("느림 정보 알림") ? "FAIL: the cut one played" : "ok")}");
+        }
         config.ProviderSettings["openai"]["key"] = TtsSecrets.Protect("bad-key");
         tts2.ConfigChanged();
         Show("bad key", Say("새 문장"));
@@ -220,7 +244,18 @@ static class Program
         var settings = new TtsSettings(provider, config);
         var proc = System.Diagnostics.Process.GetCurrentProcess();
         long before = proc.PrivateMemorySize64;
+        // Not chosen yet: refused (Windows' voice would say it).
+        try
+        {
+            provider.Synthesize(new TtsSynthesis { Text = "준비", Lang = "ko", Rate = 0, Settings = settings }, CancellationToken.None);
+            Console.WriteLine("FAIL: made speech while not wanted");
+        }
+        catch (InvalidOperationException e)
+        {
+            Console.WriteLine("not wanted yet: " + e.Message);
+        }
         sw.Restart();
+        provider.Warm(settings);
         var warm = provider.Synthesize(new TtsSynthesis { Text = "준비", Lang = "ko", Rate = 0, Settings = settings }, CancellationToken.None);
         proc.Refresh();
         Console.WriteLine($"loaded + first text in {sw.ElapsedMilliseconds} ms, memory +{(proc.PrivateMemorySize64 - before) / 1048576} MB");
@@ -242,6 +277,23 @@ static class Program
                     File.WriteAllBytes(Path.Combine(Path.GetTempPath(), "supertonic-test.wav"), WavOf(clip));
             }
         }
+        // Unloaded while a text is being made: it ends, then the engine goes (no crash).
+        var running = System.Threading.Tasks.Task.Run(() => provider.Synthesize(new TtsSynthesis { Text = "보스와 멀리 떨어지기 다음 행동 멈추기, 그리고 산개", Lang = "ko", Rate = 0, Settings = settings }, CancellationToken.None));
+        Thread.Sleep(80);
+        provider.Unload();
+        try
+        {
+            Console.WriteLine($"unloaded during a synthesis: it finished ({running.Result.Samples.Length / (double)running.Result.SampleRate:0.00} s)");
+        }
+        catch (AggregateException e)
+        {
+            Console.WriteLine("unloaded during a synthesis: " + e.GetBaseException().Message);
+        }
+        // Threads changed while chosen: loaded again with them, same speech key.
+        provider.Warm(settings);
+        config.ProviderSettings["supertonic"]["threads"] = "1";
+        var one = provider.Synthesize(new TtsSynthesis { Text = "산개", Lang = "ko", Rate = 0, Settings = new TtsSettings(provider, config) }, CancellationToken.None);
+        Console.WriteLine($"1 thread: {one.Samples.Length / (double)one.SampleRate:0.00} s, key same: {settings.Fingerprint(provider) == new TtsSettings(provider, config).Fingerprint(provider)}");
         provider.Dispose();
         if (!keep)
         {

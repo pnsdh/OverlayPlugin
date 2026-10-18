@@ -78,7 +78,16 @@ namespace RainbowMage.OverlayPlugin
                     Name = "TTS",
                     Text = "",
                 };
-                _ttsTab.Controls.Add(new Tts.TtsConfigPanel(container));
+                // Its own failure (a broken config...) only costs the tab, not the plugin.
+                try
+                {
+                    _ttsTab.Controls.Add(new Tts.TtsConfigPanel(container));
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log(LogLevel.Error, $"TTS: settings tab: {ex}");
+                    _ttsTab.Controls.Add(new Label { Text = "TTS: " + ex.Message, Dock = DockStyle.Fill });
+                }
             }
 
             logBox.Text = Resources.LogNotConnectedError;

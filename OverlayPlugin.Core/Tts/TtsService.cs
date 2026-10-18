@@ -34,8 +34,18 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly Thread worker;
         private volatile bool stopping;
 
+        // Taken from the queue and being made (a more important alert can cut it before it plays).
+        private Request making;
         private Request playing;
         private TtsPlayback playback;
+        // When the playing one started and how long it is: if its end is never heard (an output
+        // gone without saying), it is let go after that, so speech never stops for good.
+        private long playingSince;
+        private double playingSeconds;
+        private bool warmed;
+        // Speech being fetched by a slow voice, by key: asked twice (made ahead, then needed), it
+        // is fetched once.
+        private readonly Dictionary<string, Task<TtsClip>> fetching = new Dictionary<string, Task<TtsClip>>();
         private readonly Dictionary<string, DateTime> recent = new Dictionary<string, DateTime>();
 
         // Made speech by provider, settings, voice, rate and text, least recently used dropped first.
@@ -63,6 +73,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             this.config = config;
             player = new TtsPlayer(logger);
             disk = new TtsDiskCache(CacheFolder(), () => Math.Max(0, config.DiskCacheMB) * 1024L * 1024L);
+            Supertonic.SupertonicModel.CleanUp();
             AddProvider(windows);
             AddProvider(new OpenAiCompatibleProvider());
             AddProvider(new AzureProvider());
@@ -143,6 +154,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                 processor = null;
                 settings = null;
             }
+            // A zone being fetched ahead with the old settings (another voice, key...) is not
+            // wanted any more.
+            preparing?.Cancel();
             LoadOrUnload();
         }
 
@@ -192,9 +206,18 @@ namespace RainbowMage.OverlayPlugin.Tts
                         recent.Remove(old);
                 }
 
+                // Waited too long: dropped here too, so the queue never grows while one plays.
+                long nowTicks = Stopwatch.GetTimestamp();
+                queue.RemoveAll(r => Ms(r.Asked, nowTicks) > config.MaxWaitMs);
                 queue.Add(request);
+                // Cut: what is being made is not played, what plays (or is starting) stops.
+                if (making != null && Cuts(request, making))
+                    making.Cut = true;
                 if (playing != null && Cuts(request, playing))
+                {
+                    playing.Cut = true;
                     playback?.Stop();
+                }
                 // Only the last one is wanted: what waits is dropped.  (Otherwise what waits is
                 // read after, the most important first, unless it waited too long.)
                 if (config.QueueMode == TtsQueueMode.InterruptAll)
@@ -220,14 +243,32 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         private void Run()
         {
-            Warm();
-            LoadOrUnload();
+            try
+            {
+                LoadOrUnload();
+            }
+            catch (Exception e)
+            {
+                LogError($"could not load the voice: {e.Message}");
+            }
             while (!stopping)
             {
+                // Windows' voice (also the fallback) loaded once TTS is on, before an alert needs it.
+                if (!warmed && config.Enabled)
+                {
+                    warmed = true;
+                    Warm();
+                }
                 Request next;
                 lock (sync)
                 {
+                    if (playing != null && Ms(playingSince, Stopwatch.GetTimestamp()) > playingSeconds * 1000 + 2000)
+                    {
+                        playing = null;
+                        playback = null;
+                    }
                     next = playing == null ? TakeNext() : null;
+                    making = next;
                 }
                 if (next == null)
                 {
@@ -244,7 +285,15 @@ namespace RainbowMage.OverlayPlugin.Tts
                 {
                     LogError($"could not say \"{next.Text}\": {e.Message}");
                     lock (sync)
+                    {
                         playing = null;
+                        playback = null;
+                    }
+                }
+                finally
+                {
+                    lock (sync)
+                        making = null;
                 }
             }
         }
@@ -271,10 +320,14 @@ namespace RainbowMage.OverlayPlugin.Tts
             long made = Stopwatch.GetTimestamp();
             lock (sync)
             {
-                // Waited too long while being made: dropped all the same.
-                if (Ms(request.Asked, made) > config.MaxWaitMs || stopping)
+                making = null;
+                // Waited too long while being made, or cut by a more important one meanwhile:
+                // dropped.
+                if (Ms(request.Asked, made) > config.MaxWaitMs || stopping || request.Cut)
                     return;
                 playing = request;
+                playingSince = made;
+                playingSeconds = clip.Samples.Length / (double)Math.Max(1, clip.SampleRate);
             }
             player.Prepare(config.OutputDevice);
             var started = player.Play(clip, Volume(request.Severity), () =>
@@ -300,6 +353,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                 else
                 {
                     playback = started;
+                    // Cut while it was starting.
+                    if (request.Cut)
+                        started.Stop();
                 }
             }
             Report(request, Ms(request.Asked, made), Ms(request.Asked, now));
@@ -319,6 +375,15 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (ahead == null)
                 return;
             ahead.Tried = true;
+            // A slow voice is fetched off this thread (an alarm coming meanwhile must not wait for
+            // it); found in the cache, or joined while still fetching, when its turn comes.
+            if (Provider.IsSlow)
+            {
+                var plan = Plan(ahead);
+                if (plan != null && FromMemory(plan.Key) == null)
+                    Fetch(plan);
+                return;
+            }
             try
             {
                 ahead.Clip = Make(ahead);
@@ -330,8 +395,58 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         // What identifies a text's speech with the current settings (memory and disk caches).
-        private string KeyFor(ITtsProvider provider, TtsSettings s, TtsVoice voice, string spoken) =>
-            $"{provider.Id}|{s.Fingerprint(provider)}|{voice?.Id}|{config.Rate}|{spoken}";
+        // (The language when the voice has none of its own, as some voices speak what they are told.)
+        private string KeyFor(ITtsProvider provider, TtsSettings s, TtsVoice voice, string lang, string spoken) =>
+            $"{provider.Id}|{s.Fingerprint(provider)}|{voice?.Id}|{(voice?.Lang == null ? lang : "")}|{config.Rate}|{spoken}";
+
+        // What a request becomes with the current settings: the text to say, its key, the call.
+        private class Planned
+        {
+            public ITtsProvider Provider;
+            public string Key;
+            public TtsSynthesis Synthesis;
+        }
+
+        private Planned Plan(Request request)
+        {
+            var provider = Provider;
+            var s = Settings;
+            var voice = VoiceFor(provider, request.Lang);
+            string lang = voice?.Lang ?? request.Lang;
+            request.Spoken = Processor(lang).Process(request.Text);
+            if (request.Spoken == "")
+                return null;
+            return new Planned
+            {
+                Provider = provider,
+                Key = KeyFor(provider, s, voice, lang, request.Spoken),
+                Synthesis = new TtsSynthesis { Text = request.Spoken, Voice = voice, Rate = config.Rate, Lang = lang, Settings = s },
+            };
+        }
+
+        // A slow voice's speech, fetched once however many ask (kept in memory and on disk).
+        private Task<TtsClip> Fetch(Planned plan)
+        {
+            lock (fetching)
+            {
+                if (fetching.TryGetValue(plan.Key, out var running))
+                    return running;
+                var task = Task.Run(() =>
+                {
+                    try
+                    {
+                        return Keep(plan.Key, plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None), true);
+                    }
+                    finally
+                    {
+                        lock (fetching)
+                            fetching.Remove(plan.Key);
+                    }
+                });
+                fetching[plan.Key] = task;
+                return task;
+            }
+        }
 
         // A zone's alerts (from an overlay, on entering it) fetched ahead from a network voice and
         // kept on disk, two at a time, so they play at once the first time too.  A new list stops
@@ -342,13 +457,16 @@ namespace RainbowMage.OverlayPlugin.Tts
             var provider = Provider;
             if (!config.PrepareAhead || !provider.IsSlow || stopping)
                 return;
+            // A local model only if asked for: it would take the CPU for minutes beside the game.
+            if (provider is ITtsDownloadable && !config.PrepareAheadLocal)
+                return;
             var cancel = (preparing = new CancellationTokenSource()).Token;
             var s = Settings;
             lang = string.IsNullOrEmpty(lang) ? CultureInfo.CurrentUICulture.TwoLetterISOLanguageName : lang;
             var voice = VoiceFor(provider, lang);
             var processor = Processor(voice?.Lang ?? lang);
             var todo = texts.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => processor.Process(t)).Where(t => t != "")
-                .Distinct().Take(PrepareMax).Select(spoken => (spoken, key: KeyFor(provider, s, voice, spoken)))
+                .Distinct().Take(PrepareMax).Select(spoken => (spoken, key: KeyFor(provider, s, voice, voice?.Lang ?? lang, spoken)))
                 .Where(x => FromMemory(x.key) == null && disk.Get(x.key) == null).ToList();
             int done = 0, failures = 0;
             PrepareProgress = (0, todo.Count);
@@ -389,32 +507,26 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         private TtsClip Make(Request request)
         {
-            var provider = Provider;
-            var s = Settings;
-            var voice = VoiceFor(provider, request.Lang);
-            string lang = voice?.Lang ?? request.Lang;
-            request.Spoken = Processor(lang).Process(request.Text);
-            if (request.Spoken == "")
+            var plan = Plan(request);
+            if (plan == null)
                 return null;
-            string key = KeyFor(provider, s, voice, request.Spoken);
-            var kept = FromMemory(key);
+            var kept = FromMemory(plan.Key);
             if (kept != null)
             {
                 request.FromCache = true;
                 return kept;
             }
-            var synthesis = new TtsSynthesis { Text = request.Spoken, Voice = voice, Rate = config.Rate, Lang = lang, Settings = s };
-            if (!provider.IsSlow)
-                return Keep(key, provider.Synthesize(synthesis, CancellationToken.None), false);
+            if (!plan.Provider.IsSlow)
+                return Keep(plan.Key, plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None), false);
 
-            kept = disk.Get(key);
+            kept = disk.Get(plan.Key);
             if (kept != null)
             {
                 request.FromCache = true;
-                return Keep(key, kept, false);
+                return Keep(plan.Key, kept, false);
             }
-            // Over the network: not waited for longer than the fallback time.
-            var fetch = Task.Run(() => provider.Synthesize(synthesis, CancellationToken.None));
+            // Slow: not waited for longer than the fallback time; when late it is kept for next time.
+            var fetch = Fetch(plan);
             bool inTime;
             try
             {
@@ -422,21 +534,21 @@ namespace RainbowMage.OverlayPlugin.Tts
             }
             catch (AggregateException e)
             {
-                request.Error = $"{provider.Name}: {e.GetBaseException().Message}";
+                request.Error = $"{plan.Provider.Name}: {e.GetBaseException().Message}";
                 LogError(request.Error);
-                return WindowsInstead(request, lang);
+                return WindowsInstead(request, plan.Synthesis.Lang);
             }
             if (inTime && fetch.Result != null)
-                return Keep(key, fetch.Result, true);
-            // Late: kept for next time when it comes.
-            fetch.ContinueWith(t =>
+                return fetch.Result;
+            if (!inTime)
             {
-                if (t.Status == TaskStatus.RanToCompletion && t.Result != null)
-                    Keep(key, t.Result, true);
-                else if (t.Exception != null)
-                    LogError($"{provider.Name}: {t.Exception.GetBaseException().Message}");
-            });
-            return WindowsInstead(request, lang);
+                fetch.ContinueWith(t =>
+                {
+                    if (t.Exception != null)
+                        LogError($"{plan.Provider.Name}: {t.Exception.GetBaseException().Message}");
+                }, TaskContinuationOptions.OnlyOnFaulted);
+            }
+            return WindowsInstead(request, plan.Synthesis.Lang);
         }
 
         private TtsClip WindowsInstead(Request request, string lang)
@@ -464,8 +576,12 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             if (clip == null)
                 return null;
+            // Written off the caller's thread: an alert plays before its file is saved.
             if (onDisk)
-                disk.Put(key, clip);
+            {
+                var toDisk = clip;
+                ThreadPool.QueueUserWorkItem(_ => disk.Put(key, toDisk));
+            }
             int rate = player.MixRate;
             if (rate > 0 && rate != clip.SampleRate)
                 clip = new TtsClip(TtsPlayer.Resample(clip, rate), rate);
@@ -573,6 +689,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             public bool FromCache;
             public bool FellBack;
             public string Error;
+            // A more important alert came while it was made or started.
+            public bool Cut;
         }
     }
 

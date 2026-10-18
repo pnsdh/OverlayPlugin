@@ -27,6 +27,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
         private readonly int chunkCompressFactor;
         private readonly int latentDim;
         private readonly Dictionary<string, Style> styles = new Dictionary<string, Style>();
+        private readonly SessionOptions options;
         private readonly string folder;
 
         public int SampleRate { get; }
@@ -43,16 +44,25 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             indexer = JArray.Parse(File.ReadAllText(Path.Combine(onnx, "unicode_indexer.json"))).Select(v => (long)v).ToArray();
 
             // Few threads: it runs beside the game, a short alert needs little.
-            var options = new SessionOptions
+            options = new SessionOptions
             {
                 IntraOpNumThreads = Math.Max(1, threads),
                 InterOpNumThreads = 1,
                 GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             };
-            durationPredictor = new InferenceSession(Path.Combine(onnx, "duration_predictor.onnx"), options);
-            textEncoder = new InferenceSession(Path.Combine(onnx, "text_encoder.onnx"), options);
-            vectorEstimator = new InferenceSession(Path.Combine(onnx, "vector_estimator.onnx"), options);
-            vocoder = new InferenceSession(Path.Combine(onnx, "vocoder.onnx"), options);
+            // A model that does not load (a broken file, no memory): what was loaded is freed.
+            try
+            {
+                durationPredictor = new InferenceSession(Path.Combine(onnx, "duration_predictor.onnx"), options);
+                textEncoder = new InferenceSession(Path.Combine(onnx, "text_encoder.onnx"), options);
+                vectorEstimator = new InferenceSession(Path.Combine(onnx, "vector_estimator.onnx"), options);
+                vocoder = new InferenceSession(Path.Combine(onnx, "vocoder.onnx"), options);
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
         }
 
         private class Style
@@ -261,6 +271,7 @@ namespace RainbowMage.OverlayPlugin.Tts.Supertonic
             textEncoder?.Dispose();
             vectorEstimator?.Dispose();
             vocoder?.Dispose();
+            options?.Dispose();
         }
     }
 }

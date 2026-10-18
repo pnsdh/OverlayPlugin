@@ -88,6 +88,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         // A short hint under the field (e.g. where to get a key).
         public string Hint { get; set; }
         public string HintKo { get; set; }
+        // Changes how, not what, is said (e.g. CPU threads): not part of made speech's key.
+        public bool NotInKey { get; set; }
     }
 
     // Mono samples (-1 to 1) at a rate, ready to mix.

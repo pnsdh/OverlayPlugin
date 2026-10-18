@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 
@@ -52,7 +53,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             // What reads.
             var general = Section(root, T("Text to speech", "TTS"));
             general.Controls.Add(Check(T("Read alerts with this plugin's TTS (off: ACT's own TTS, as before)", "알림을 이 플러그인의 TTS로 읽기 (끄면 지금까지처럼 ACT의 TTS)"),
-                config.Enabled, v => { config.Enabled = v; ApplyBridge(); }));
+                config.Enabled, v => { config.Enabled = v; ApplyBridge(); Changed(); }));
             general.Controls.Add(Check(T("Also read what ACT itself speaks (its custom triggers, other plugins)", "ACT가 읽는 것(커스텀 트리거, 다른 플러그인)도 이 플러그인으로 읽기"),
                 config.TakeOverActTts, v => { config.TakeOverActTts = v; ApplyBridge(); }));
             general.Controls.Add(Check(T("When another plugin speaks for ACT (e.g. TTSYukkuri), send overlays' alerts to it too", "다른 플러그인(TTSYukkuri 등)이 ACT의 TTS를 맡고 있으면 오버레이 알림도 그쪽으로 보내기"),
@@ -107,6 +108,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                 "한 번 만든 알림은 다시 만들지 않고(유료 서비스는 요금도 한 번) 바로 재생합니다. ACT를 다시 시작해도 남습니다.")));
             network.Controls.Add(Check(T("On entering a zone, make its alerts ahead (so the first time is quick too; a paid service charges each once)",
                 "지역에 들어가면 그 지역 알림을 미리 만들어 두기 (처음에도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => config.PrepareAhead = v));
+            network.Controls.Add(Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
+                "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => config.PrepareAheadLocal = v));
             prepared = Hint("");
             network.Controls.Add(prepared);
             service.Prepared += OnPrepared;
@@ -170,7 +173,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 ownerTimer.Enabled = Visible;
                 if (Visible)
+                {
                     ShowOwner();
+                    ShowCacheSize();
+                    OnPrepared(service.PrepareProgress.Done, service.PrepareProgress.Total);
+                    refreshDownload?.Invoke();
+                }
             };
             ShowOwner();
             ShowProviderFields();
@@ -222,6 +230,10 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         private System.Threading.CancellationTokenSource downloading;
+        // The download panel shown now (made again with the provider fields): what a running
+        // download reports to.
+        private Action refreshDownload;
+        private Action<string> downloadStatus;
 
         // Download, progress, delete, and what the user agrees to (the model's license).
         private Control DownloadPanel(ITtsDownloadable model)
@@ -231,6 +243,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             Button download = null, cancel = null, delete = null;
             string Mb(long bytes) => (bytes / 1024.0 / 1024.0).ToString("0");
+            refreshDownload = Show;
+            downloadStatus = text =>
+            {
+                if (!status.IsDisposed)
+                    status.Text = text;
+            };
             void Show()
             {
                 if (status.IsDisposed)
@@ -251,25 +269,21 @@ namespace RainbowMage.OverlayPlugin.Tts
                 downloading = new System.Threading.CancellationTokenSource();
                 Show();
                 var progress = new Progress<(long Done, long Total)>(p =>
-                {
-                    if (!status.IsDisposed)
-                        status.Text = T($"Downloading... {Mb(p.Done)} / {Mb(p.Total)} MB", $"내려받는 중... {Mb(p.Done)} / {Mb(p.Total)}MB");
-                });
+                    downloadStatus?.Invoke(T($"Downloading... {Mb(p.Done)} / {Mb(p.Total)} MB", $"내려받는 중... {Mb(p.Done)} / {Mb(p.Total)}MB")));
                 try
                 {
                     await model.Download(progress, downloading.Token);
                     downloading = null;
                     service.ConfigChanged();
-                    Show();
+                    refreshDownload?.Invoke();
                 }
                 catch (Exception ex)
                 {
                     downloading = null;
-                    Show();
-                    if (!status.IsDisposed)
-                        status.Text = ex is OperationCanceledException
+                    refreshDownload?.Invoke();
+                    downloadStatus?.Invoke(ex is OperationCanceledException
                             ? T("Download stopped (what came is kept; downloading again goes on from there).", "내려받기를 멈췄습니다 (받은 파일은 남아 있어 다시 누르면 이어서 받습니다).")
-                            : T("Download failed: ", "내려받지 못했습니다: ") + ex.GetBaseException().Message;
+                            : T("Download failed: ", "내려받지 못했습니다: ") + ex.GetBaseException().Message);
                 }
             });
             cancel = Button(T("Stop", "멈추기"), () => downloading?.Cancel());
@@ -279,10 +293,13 @@ namespace RainbowMage.OverlayPlugin.Tts
                 {
                     model.Delete();
                     Show();
+                    if (Directory.Exists(model.Folder))
+                        status.Text = T("Deleted. One file in use is removed when ACT restarts.", "지웠습니다. 사용 중인 파일 하나는 ACT를 다시 시작하면 지워집니다.");
                 }
                 catch (Exception ex)
                 {
-                    status.Text = T("Could not delete everything (in use: restart ACT, then delete again): ", "모두 지우지 못했습니다 (사용 중: ACT를 다시 시작한 뒤 다시 지우세요): ") + ex.Message;
+                    Show();
+                    status.Text = T("Could not delete everything: ", "모두 지우지 못했습니다: ") + ex.Message;
                 }
             });
             buttons.Controls.Add(download);
@@ -473,9 +490,11 @@ namespace RainbowMage.OverlayPlugin.Tts
                     return;
                 prepared.Text = total == 0 ? "" : T($"Made ahead for this zone: {done} of {total}", $"이 지역 알림 미리 만들기: {done}/{total}");
             }
-            if (IsHandleCreated && InvokeRequired)
+            if (!IsHandleCreated)
+                return;
+            if (InvokeRequired)
                 BeginInvoke((Action)Show);
-            else if (!InvokeRequired)
+            else
                 Show();
         }
 
@@ -489,7 +508,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                 AllowUserToDeleteRows = true,
                 RowHeadersWidth = 24,
                 AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill,
-                SelectionMode = DataGridViewSelectionMode.CellSelect,
+                // Rows selected by their header can be deleted (Delete key).
+                SelectionMode = DataGridViewSelectionMode.RowHeaderSelect,
             };
             grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Enabled", HeaderText = T("On", "사용"), FillWeight = 12 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Find", HeaderText = T("Find", "찾을 말"), FillWeight = 40 });
@@ -497,6 +517,9 @@ namespace RainbowMage.OverlayPlugin.Tts
             grid.Columns.Add(new DataGridViewCheckBoxColumn { Name = "Regex", HeaderText = T("Regex", "정규식"), FillWeight = 14 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Lang", HeaderText = T("Language", "언어"), FillWeight = 14 });
             grid.Columns.Add(new DataGridViewTextBoxColumn { Name = "Note", HeaderText = T("Note", "설명"), FillWeight = 40 });
+            // The order is the order rules apply: not sorted by a header click.
+            foreach (DataGridViewColumn column in grid.Columns)
+                column.SortMode = DataGridViewColumnSortMode.NotSortable;
             FillRules(grid);
             grid.CellValueChanged += (o, e) => SaveRules();
             grid.UserDeletedRow += (o, e) => SaveRules();
