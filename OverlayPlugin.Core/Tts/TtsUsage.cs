@@ -71,6 +71,17 @@ namespace RainbowMage.OverlayPlugin.Tts
         // Only voices that cost something are counted (not Windows' or Supertonic).
         public static bool Billed(ITtsProvider provider) => provider is RemoteProvider;
 
+        // Billed, and not a compatible server on this computer (a local Kokoro-FastAPI costs
+        // nothing): what the warnings and the limit rule for making ahead are for.
+        public static bool Paid(ITtsProvider provider, TtsSettings settings)
+        {
+            if (!Billed(provider))
+                return false;
+            if (provider is OpenAiCompatibleProvider && Uri.TryCreate(settings["url"], UriKind.Absolute, out var url))
+                return !url.IsLoopback;
+            return true;
+        }
+
         // An entry for each paid voice made at start, so none is added while the config is being
         // saved (which reads the same dictionary on the UI thread).
         public void Prepare(IEnumerable<ITtsProvider> providers)

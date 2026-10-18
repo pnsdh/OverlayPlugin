@@ -19,6 +19,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly ActTtsBridge bridge;
         private readonly IPluginConfig pluginConfig;
         private TrackBar masterBar;
+        private Label paidNote;
         private readonly TtsConfig config;
         private Label owner;
         private Label previewResult;
@@ -105,12 +106,21 @@ namespace RainbowMage.OverlayPlugin.Tts
 
             var voice = Section(basic, T("Voice", "음성"));
             var voiceGrid = Grid(voice);
-            Row(voiceGrid, T("Engine", "엔진"), Combo(service.Providers.Select(p => new Item($"{p.Name} ({p.Note})", p.Id)), config.Provider, v =>
+            ComboBox engines = null;
+            engines = Combo(service.Providers.Select(p => new Item($"{p.Name} ({p.Note})", p.Id)), config.Provider, v =>
             {
+                if (!ConfirmPaid((string)v))
+                {
+                    loading = true;
+                    engines.SelectedItem = engines.Items.Cast<Item>().FirstOrDefault(i => Equals(i.Value, config.Provider));
+                    loading = false;
+                    return;
+                }
                 config.Provider = (string)v;
                 Changed();
                 ShowProviderFields();
-            }));
+            });
+            Row(voiceGrid, T("Engine", "엔진"), engines);
             // The chosen engine's own settings (voice, or address, key...), made again when it changes.
             providerFields = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0) };
             voice.Controls.Add(providerFields);
@@ -177,8 +187,8 @@ namespace RainbowMage.OverlayPlugin.Tts
             network.Controls.Add(Hint(T("Not for the preview below, which waits for the voice itself.", "아래 미리 듣기에는 쓰지 않습니다 (그 목소리 자체를 기다림).")));
             network.Controls.Add(Check(T("Make ahead the alerts cactbot sends on entering a zone (so the first time is quick too; a paid service charges each once)",
                 "캑봇이 지역에 들어갈 때 보내 주는 알림 문장을 미리 만들어 두기 (처음 나오는 알림도 바로 읽음, 유료 서비스는 문장마다 한 번 요금)"), config.PrepareAhead, v => { config.PrepareAhead = v; if (!v) service.CancelPrepare(); }));
-            network.Controls.Add(Hint(T("A paid service makes all of a zone's alerts the first time (often hundreds of texts, thousands of characters). Made once, kept for good; but a small free allowance (ElevenLabs' free plan: 10,000 characters a month; Gemini's free tier: requests a day) can be gone in a few zones. Set a monthly limit under Made speech and usage. When a service says it is over its limit, it is left alone for a while and Windows' voice reads.",
-                "유료 서비스는 지역에 처음 들어갈 때 그 지역 알림 전부(보통 수백 문장, 수천 자)를 만듭니다. 한 번 만든 음성은 계속 쓰지만, 무료 사용량이 적은 서비스(ElevenLabs 무료 플랜 월 1만 자, Gemini 무료 등급의 하루 요청 수)는 몇 지역 만에 다 쓸 수 있습니다. 만든 음성·사용량 탭에서 월 한도를 정해 두세요. 서비스가 한도를 넘었다고 답하면 한동안 보내지 않고 Windows 음성으로 읽습니다.")));
+            network.Controls.Add(Hint(T("A paid service makes all of a zone's alerts the first time (often hundreds of texts, thousands of characters). Made once, kept for good; but a small free allowance (ElevenLabs' free plan: 10,000 characters a month; Gemini's free tier: requests a day) can be gone in a few zones. So a paid service makes ahead only once a monthly limit is set (Made speech and usage). When a service says it is over its limit, it is left alone for a while and Windows' voice reads.",
+                "유료 서비스는 지역에 처음 들어갈 때 그 지역 알림 전부(보통 수백 문장, 수천 자)를 만듭니다. 한 번 만든 음성은 계속 쓰지만, 무료 사용량이 적은 서비스(ElevenLabs 무료 플랜 월 1만 자, Gemini 무료 등급의 하루 요청 수)는 몇 지역 만에 다 쓸 수 있습니다. 그래서 유료 서비스는 월 한도를 정해야 미리 만듭니다 (만든 음성·사용량 탭). 서비스가 한도를 넘었다고 답하면 한동안 보내지 않고 Windows 음성으로 읽습니다.")));
             localPrepare = Check(T("Also with Supertonic (uses the CPU for a few minutes after entering a zone)",
                 "Supertonic도 미리 만들기 (지역에 들어간 뒤 몇 분 동안 CPU를 씀)"), config.PrepareAheadLocal, v => { config.PrepareAheadLocal = v; if (!v) service.CancelPrepare(); });
             network.Controls.Add(localPrepare);
@@ -500,6 +510,36 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         // The engine's own settings: Windows' voices to pick from, or a service's fields.
+        // Said in a paid engine's fields, with its monthly limit (kept up when the limit changes).
+        private string PaidNoteText(ITtsProvider provider)
+        {
+            long limit = service.Usage.Get(provider).MonthlyLimit;
+            return T($"Paid: billed to your account by the character. Monthly limit: {(limit > 0 ? $"{limit:N0} characters" : "none (nothing is made ahead until one is set)")}",
+                $"유료: 읽은 글자 수만큼 본인 계정에 요금이 나옵니다. 월 한도: {(limit > 0 ? $"{limit:N0}자" : "없음 (정하기 전에는 미리 만들기 안 함)")}");
+        }
+
+        // A paid service chosen: what it costs and how making ahead uses it, said before it is used.
+        private bool ConfirmPaid(string id)
+        {
+            var provider = service.Providers.FirstOrDefault(p => p.Id == id);
+            if (provider == null || !TtsUsageCounter.Paid(provider, new TtsSettings(provider, config)))
+                return true;
+            return MessageBox.Show(this,
+                T($"{provider.Name} is a paid service.\n\n" +
+                  "- What it reads is billed to your own account, by the character.\n" +
+                  "- Making ahead makes all of a zone's alerts the first time you enter it: often hundreds of texts, thousands of characters. With cactbot's \"make ahead alerts naming a player too\", more.\n" +
+                  "- Free allowances differ and can be small (ElevenLabs' free plan: 10,000 characters a month).\n" +
+                  "- Nothing is made ahead until you set a monthly limit (Made speech and usage). At the limit, Windows' voice reads for the rest of the month.\n\n" +
+                  "Use this engine?",
+                  $"{provider.Name}은(는) 유료 서비스입니다.\n\n" +
+                  "· 읽은 글자 수만큼 본인 계정에 요금이 청구됩니다.\n" +
+                  "· 미리 만들기는 지역에 처음 들어갈 때 그 지역 알림 전부(보통 수백 문장, 수천 자)를 만듭니다. 캑봇의 \"플레이어가 들어간 알림도 미리 만들기\"를 켜면 더 늘어납니다.\n" +
+                  "· 무료 사용량은 서비스마다 다르고 작을 수 있습니다 (ElevenLabs 무료 플랜은 월 1만 자).\n" +
+                  "· 월 한도를 정하기 전에는 미리 만들기를 하지 않습니다 (만든 음성·사용량 탭). 한도에 닿으면 그 달 남은 기간은 Windows 음성으로 읽습니다.\n\n" +
+                  "이 엔진을 쓸까요?"),
+                "TTS", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) == DialogResult.OK;
+        }
+
         private void ShowProviderFields()
         {
             bool wasLoading = loading;
@@ -528,8 +568,23 @@ namespace RainbowMage.OverlayPlugin.Tts
             {
                 foreach (var field in provider.Fields)
                     Row(grid, ko ? field.LabelKo : field.Label, FieldControl(provider, field));
-                providerFields.Controls.Add(Hint(T("Your own key and its costs; the key is kept encrypted for this Windows user.",
-                    "본인 키를 쓰며 요금도 본인 계정에 나옵니다. 키는 이 Windows 사용자만 풀 수 있게 암호화해 저장합니다.")));
+                paidNote = null;
+                if (TtsUsageCounter.Paid(provider, service.Settings))
+                {
+                    providerFields.Controls.Add(paidNote = new Label
+                    {
+                        Text = PaidNoteText(provider),
+                        AutoSize = true,
+                        MaximumSize = new Size(760, 0),
+                        ForeColor = Color.FromArgb(190, 70, 0),
+                        Font = new Font(Font, FontStyle.Bold),
+                        Margin = new Padding(3, 0, 3, 6),
+                    });
+                    // First, right under the engine.
+                    providerFields.Controls.SetChildIndex(paidNote, 0);
+                }
+                providerFields.Controls.Add(Hint(T("Your own key; it is kept encrypted for this Windows user.",
+                    "본인 키를 씁니다. 키는 이 Windows 사용자만 풀 수 있게 암호화해 저장합니다.")));
             }
             providerFields.ResumeLayout();
             // Fallback, disk, fetching ahead and usage are only for a slow voice (network,
@@ -606,6 +661,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                     text += "\n" + TtsService.PausedText(provider, pause.Value);
                 resume.Visible = pause != null;
                 lines.Text = text;
+                if (paidNote != null && !paidNote.IsDisposed)
+                    paidNote.Text = PaidNoteText(provider);
             };
             refreshUsage();
 
@@ -634,7 +691,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             };
             var limitRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
             limitRow.Controls.Add(limit);
-            limitRow.Controls.Add(Hint(T("characters; past it Windows' voice reads until next month. 0: no limit", "자. 넘으면 다음 달까지 Windows 음성으로 읽음. 0이면 제한 없음")));
+            limitRow.Controls.Add(Hint(T("characters; past it Windows' voice reads until next month. 0: no limit (a paid service then makes nothing ahead)", "자. 넘으면 다음 달까지 Windows 음성으로 읽음. 0이면 제한 없음 (이때 유료 서비스는 미리 만들기를 하지 않음)")));
             Row(grid, T("Monthly limit", "월 한도"), limitRow);
 
             var buttons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0) };
@@ -993,7 +1050,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                 string size = last.Billed
                     ? T($" (about {last.Chars:N0} characters, counted as usage)", $" (약 {last.Chars:N0}자, 사용량에 잡힘)")
                     : "";
-                prepared.Text = total == 0 ? "" : T($"Made ahead for this zone: {done} of {total}", $"이 지역 알림 미리 만들기: {done}/{total}") + size;
+                prepared.Text = total == 0
+                    ? service.PrepareNote ?? ""
+                    : T($"Made ahead for this zone: {done} of {total}", $"이 지역 알림 미리 만들기: {done}/{total}") + size;
             }
             if (!IsHandleCreated)
                 return;

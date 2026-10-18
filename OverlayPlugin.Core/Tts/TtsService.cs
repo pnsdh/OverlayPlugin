@@ -78,6 +78,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         public (int Done, int Total) PrepareProgress { get; private set; }
         // The last zone's list: texts to make, their characters, whether the voice is paid for.
         public (int Count, long Chars, bool Billed) LastPrepare { get; private set; }
+        // Why the last list was not made ahead (none: it was).
+        public string PrepareNote { get; private set; }
         private CancellationTokenSource preparing;
         private const int PrepareMax = 500;
 
@@ -626,10 +628,21 @@ namespace RainbowMage.OverlayPlugin.Tts
             // A local model only if asked for: it would take the CPU for minutes beside the game.
             if (provider is ITtsDownloadable && !config.PrepareAheadLocal)
                 return;
+            PrepareNote = null;
             var pause = PausedFor(provider);
             if (pause != null)
             {
                 LogError(PausedText(provider, pause.Value));
+                return;
+            }
+            // A paid service only with a monthly limit: a zone is hundreds of texts.
+            if (TtsUsageCounter.Paid(provider, Settings) && Usage.Get(provider).MonthlyLimit <= 0)
+            {
+                PrepareNote = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
+                    ? "유료 서비스는 월 한도를 정해야 미리 만듭니다 (만든 음성·사용량 탭)"
+                    : "A paid service makes ahead only with a monthly limit (Made speech and usage)";
+                PrepareProgress = (0, 0);
+                Prepared?.Invoke(0, 0);
                 return;
             }
             var cancel = (preparing = new CancellationTokenSource()).Token;
@@ -661,6 +674,13 @@ namespace RainbowMage.OverlayPlugin.Tts
                                 beingMade = fetching.ContainsKey(x.key);
                             if (beingMade || FromMemory(x.key) != null || disk.Has(x.key))
                                 return;
+                            // An alert being made or waiting comes first (it would wait for the
+                            // engine, or the connection, otherwise).
+                            while (LiveWaiting())
+                            {
+                                cancel.ThrowIfCancellationRequested();
+                                Thread.Sleep(50);
+                            }
                             if (PausedFor(provider) != null)
                             {
                                 state.Stop();
@@ -859,6 +879,18 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         // The same failure (no network, a bad key) logged once a minute, not for every alert.
+        // An alert (not the preview) waiting to be made, being made, or being fetched.
+        private bool LiveWaiting()
+        {
+            lock (sync)
+            {
+                if ((making != null && making.Clip == null && !making.Preview) || queue.Any(r => r.Clip == null && !r.Preview))
+                    return true;
+            }
+            lock (fetching)
+                return fetching.Count > 0;
+        }
+
         // Until when a service is paused (none: it can be asked).
         public (DateTime Until, string Reason)? PausedFor(ITtsProvider provider)
         {
