@@ -19,6 +19,7 @@ using RainbowMage.OverlayPlugin.Overlays;
 //
 // UiShot.exe <out folder> [ko-KR|en|...] [width] [height]   (UISHOT_TRACE=1: full errors)
 // UiShot.exe techsupport [extra overlays]                   the tech support text from sample data
+// UiShot.exe censor                                         what it hides, on sample paths
 // Needs the plugin built (out\Release\libs).
 static class Program
 {
@@ -60,6 +61,8 @@ static class Program
         Application.EnableVisualStyles();
         // Designer resources that need a type looked up (e.g. TableLayoutSettings) are read only with this on.
         AppContext.SetSwitch("System.Resources.ResourceManager.AllowCustomResourceTypes", true);
+        if (outDir == "censor")
+            return CensorCheck();
         if (sample)
             return TechSupportSample(args.Length > 1 ? int.Parse(args[1]) : 5);
         Directory.CreateDirectory(outDir);
@@ -279,6 +282,50 @@ static class Program
         Console.WriteLine(text);
         Console.WriteLine($"[{text.Length} characters]");
         return 0;
+    }
+
+    // What the tech support text hides, checked on paths written the ways overlays and logs write
+    // them, for an ACT folder under a Korean user name (as a browser reports it, percent-encoded)
+    // and under this PC's user name.  Prints each case; returns how many still show the name.
+    static int CensorCheck()
+    {
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+        var type = typeof(PluginConfig).Assembly.GetType("RainbowMage.OverlayPlugin.ClipboardTechSupport");
+        var setup = type.GetMethod("SetupCensor", BindingFlags.Instance | BindingFlags.NonPublic);
+        var censor = type.GetMethod("Censor", BindingFlags.Instance | BindingFlags.NonPublic);
+        int failed = 0;
+        void Check(string actFolder, string secret, params string[] inputs)
+        {
+            var info = FormatterServices.GetUninitializedObject(type);
+            type.GetField("ACTPathReplace", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(info, "<ACT>");
+            setup.Invoke(info, new object[] { actFolder });
+            foreach (var input in inputs)
+            {
+                var output = (string)censor.Invoke(info, new object[] { input });
+                bool leaks = output.IndexOf(secret, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    output.IndexOf(Uri.EscapeDataString(secret), StringComparison.OrdinalIgnoreCase) >= 0;
+                if (leaks)
+                    failed++;
+                Console.WriteLine($"{(leaks ? "LEAK" : "ok  ")} {output}");
+            }
+        }
+        string korean = "홍길동";
+        string act = $@"C:\Users\{korean}\AppData\Roaming\Advanced Combat Tracker";
+        string enc = Uri.EscapeDataString(korean);
+        Check(act, korean,
+            $@"{act}\Plugins\cbkr\ui\raidboss\raidboss.html",
+            $"file:///C:/Users/{korean}/AppData/Roaming/Advanced Combat Tracker/Plugins/cbkr/ui/raidboss/raidboss.html?timeline=1",
+            $"file:///C:/Users/{korean}/AppData/Roaming/Advanced%20Combat%20Tracker/Plugins/x.html",
+            $"BrowserError: ERR_FILE_NOT_FOUND, file:///C:/Users/{enc}/AppData/Roaming/Advanced%20Combat%20Tracker/Plugins/x.html",
+            $@"c:\users\{korean}\appdata\roaming\advanced combat tracker\cbkr-user");
+        string me = Environment.UserName;
+        Check($@"D:\Games\ACT", me,
+            $@"C:\Users\{me}\Documents\cactbot-user",
+            $@"c:\users\{me.ToLowerInvariant()}\Documents\cactbot-user",
+            $"file:///C:/Users/{Uri.EscapeDataString(me)}/Desktop/overlay.html",
+            @"D:\Games\ACT\Plugins\cbkr\ui\raidboss\raidboss.html");
+        Console.WriteLine(failed == 0 ? "nothing shows" : $"{failed} still show it");
+        return failed;
     }
 
     static void SimulateWebView2()
