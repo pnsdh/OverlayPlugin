@@ -267,6 +267,19 @@ namespace RainbowMage.OverlayPlugin
                 .Where(f => File.Exists(Path.Combine(Path.GetTempPath(), f))).ToList();
             if (switches.Count > 0)
                 fork.Add("Dev switches on: " + string.Join(", ", switches));
+            // Fork: the plugin's TTS, and who speaks for ACT (another plugin may have taken it).
+            try
+            {
+                if (container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.TtsService tts))
+                {
+                    container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.ActTtsBridge bridge);
+                    var actTts = bridge == null ? "?" : bridge.CurrentOwner == Tts.ActTtsBridge.Owner.OtherPlugin ? bridge.OwnerName : bridge.CurrentOwner.ToString();
+                    fork.Add($"TTS {OnOff(tts.Config.Enabled)}, {tts.Provider.Id}, ACT's TTS: {actTts}, queue {tts.Config.QueueMode}");
+                }
+            }
+            catch (Exception)
+            {
+            }
 
             // Note: this is a little bit of an abstraction violation to have OverlayPlugin
             // throw up information about cactbot.
