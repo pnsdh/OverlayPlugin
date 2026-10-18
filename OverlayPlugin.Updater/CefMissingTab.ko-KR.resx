@@ -153,4 +153,7 @@
   <data name="label7.Text" xml:space="preserve">
     <value>전투에서 벗어나면 전투 기록 종료</value>
   </data>
+  <data name="tabPage3.Text" xml:space="preserve">
+    <value>로그</value>
+  </data>
 </root>

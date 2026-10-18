@@ -152,4 +152,10 @@
   <data name="btnCactbotUpdate.Text" xml:space="preserve">
     <value>Cactbot 업데이트 확인</value>
   </data>
+  <data name="btnClearCEFCache.Text" xml:space="preserve">
+    <value>다음 시작 때 CEF 캐시 지우기</value>
+  </data>
+  <data name="btnClipboardTechSupport.Text" xml:space="preserve">
+    <value>기술 지원 정보 복사</value>
+  </data>
 </root>

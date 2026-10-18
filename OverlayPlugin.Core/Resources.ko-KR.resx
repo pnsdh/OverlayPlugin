@@ -299,4 +299,26 @@
   <data name="ErrorCouldNotLoadPresets" xml:space="preserve">
     <value>NewOverlayDialog: 프리셋 불러오기 실패: {0}</value>
   </data>
+  <data name="ClearCacheRestart" xml:space="preserve">
+    <value>CEF 캐시를 지우려면 ACT를 다시 시작하세요.</value>
+  </data>
+  <data name="LogNotConnectedError" xml:space="preserve">
+    <value>오류: 로그가 연결되지 않았습니다.</value>
+  </data>
+  <data name="TabsESLabel" xml:space="preserve">
+    <value>이벤트 소스</value>
+  </data>
+  <data name="WSIndexPage" xml:space="preserve">
+    <value>&lt;h1&gt;작동 중입니다!&lt;/h1&gt;
+        &lt;p&gt;
+            아래 링크 중 앞에 &amp;quot;Local:&amp;quot;이 붙고 눌리지 않는 것은 로컬 파일을 보여 주는 오버레이이기 때문입니다.
+            웹 브라우저는 웹 사이트가 로컬 파일로 연결하는 것을 막습니다.
+        &lt;/p&gt;
+        &lt;p&gt;
+            그런 링크는 주소창에 복사해 붙여 넣으세요.
+        &lt;/p&gt;</value>
+  </data>
+  <data name="ErrorCouldNotLoadReservedLogLines" xml:space="preserve">
+    <value>FFXIVCustomLogLines: 예약된 로그 줄을 불러오지 못했습니다: {0}</value>
+  </data>
 </root>
