@@ -62,6 +62,16 @@ namespace RainbowMage.OverlayPlugin.EventSources
                 if (text == null)
                     return null;
 
+                // Fork: read by the plugin's own TTS, with how important it is (severity: info,
+                // alert, alarm) and its language (lang), unless that is off or another plugin
+                // speaks for ACT and the user prefers it (see ActTtsBridge).
+                if (container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.TtsService tts) && tts.Config.Enabled &&
+                    !(container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.ActTtsBridge bridge) && bridge.DeferToOther))
+                {
+                    tts.Speak(text, Tts.TtsSeverityParser.Parse(msg["severity"]?.ToString()), msg["source"]?.ToString() ?? "overlay", msg["lang"]?.ToString());
+                    return null;
+                }
+
                 ActGlobals.oFormActMain.TTS(text);
                 return null;
             });

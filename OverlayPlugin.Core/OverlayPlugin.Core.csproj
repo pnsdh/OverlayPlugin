@@ -25,6 +25,7 @@
     <Reference Include="System.Web" />
     <Reference Include="System.Web.Services" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Speech" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
   </ItemGroup>
@@ -410,6 +411,8 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Fleck" Version="1.2.0" />
+    <!-- Fork: audio output for the plugin's TTS (Tts/TtsPlayer.cs). -->
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />
     <PackageReference Include="YamlDotNet" Version="12.0.2" />
   </ItemGroup>

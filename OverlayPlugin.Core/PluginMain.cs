@@ -115,6 +115,22 @@ namespace RainbowMage.OverlayPlugin
                     return;
                 }
 
+                // Fork: the plugin's own TTS, ready before overlays speak; ACT's TTS taken over
+                // if that is on and no other plugin has it (see ActTtsBridge).
+                this.label.Text = "Init Phase 1: TTS";
+                try
+                {
+                    var tts = new Tts.TtsService(_container, Config.Tts ?? (Config.Tts = new Tts.TtsConfig()));
+                    _container.Register(tts);
+                    var bridge = new Tts.ActTtsBridge(_container, tts);
+                    _container.Register(bridge);
+                    bridge.Apply();
+                }
+                catch (Exception ex)
+                {
+                    _logger.Log(LogLevel.Error, $"TTS: could not start: {ex}");
+                }
+
                 this.label.Text = "Init Phase 1: WSServer";
                 _container.Register(new WSServer(_container));
 
@@ -469,6 +485,12 @@ namespace RainbowMage.OverlayPlugin
             }
             if (_container.TryResolve(out OverlayHider hider))
                 hider.Dispose();
+
+            // Fork: ACT's TTS given back (if still this plugin's), speech stopped.
+            if (_container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.ActTtsBridge ttsBridge))
+                ttsBridge.Dispose();
+            if (_container.TryResolve(ResolveOptions.FailUnregisteredOnly, out Tts.TtsService tts))
+                tts.Dispose();
 
             if (_container.TryResolve(out OverlayZCorrector corrector))
             {

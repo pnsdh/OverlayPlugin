@@ -128,6 +128,12 @@ static class Program
             SetProperty(overlay, "Config", overlayConfig);
             return new MiniParseConfigPanel(container, overlay);
         });
+        Shoot("TtsConfigPanel", () =>
+        {
+            if (!container.CanResolve<RainbowMage.OverlayPlugin.Tts.TtsService>())
+                container.Register(new RainbowMage.OverlayPlugin.Tts.TtsService(container, config.Tts));
+            return new RainbowMage.OverlayPlugin.Tts.TtsConfigPanel(container);
+        });
         Shoot("WSConfigPanel", () => new WSConfigPanel(container));
         Shoot("BuiltinEventConfigPanel", () =>
         {
