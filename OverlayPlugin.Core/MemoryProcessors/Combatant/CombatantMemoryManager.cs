@@ -10,6 +10,8 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
         Combatant GetSelfCombatant();
         Combatant GetCombatantFromAddress(IntPtr address, uint selfCharID);
         List<Combatant> GetCombatantList();
+        // Fork: without each one's status effects (left empty), for frequent callers.
+        List<Combatant> GetCombatantList(bool includeEffects);
     }
 
     public class CombatantMemoryManager : ICombatantMemory
@@ -87,6 +89,15 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
                 return new List<Combatant>();
             }
             return memory.GetCombatantList();
+        }
+
+        public List<Combatant> GetCombatantList(bool includeEffects)
+        {
+            if (!IsValid())
+            {
+                return new List<Combatant>();
+            }
+            return memory.GetCombatantList(includeEffects);
         }
 
         public Combatant GetSelfCombatant()

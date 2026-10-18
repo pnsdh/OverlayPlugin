@@ -1,0 +1,13 @@
+<!doctype html><html><head><style>html,body{margin:0;background:transparent}div{color:#fff;font:28px sans-serif;text-shadow:0 0 4px #000}</style></head><body><div>WebView2 smoke test</div>
+<script>
+let ticks = 0;
+window.__OverlayCallback = (e) => { ticks++; if (ticks === 5) console.log('ticks ok', JSON.stringify(e)); };
+const wait = () => {
+  if (!window.OverlayPluginApi || !window.OverlayPluginApi.ready) { setTimeout(wait, 100); return; }
+  console.log('api ready', OverlayPluginApi.overlayName, OverlayPluginApi.overlayUuid);
+  OverlayPluginApi.callHandler(JSON.stringify({ call: 'test', x: 1 }), (r) => console.log('callHandler result', r));
+  OverlayPluginApi.broadcastMessage('hello from page');
+};
+wait();
+setTimeout(() => { throw new Error('test exception'); }, 1500);
+</script></body></html>

@@ -338,16 +338,16 @@ namespace RainbowMage.OverlayPlugin.Overlays
                 switch (e["type"].ToString())
                 {
                     case "CombatData":
-                        ExecuteScript("__OverlayPlugin_ws_faker({'type': 'broadcast', 'msgtype': 'CombatData', 'msg': " + e.ToString(Formatting.None) + " });");
+                        ExecuteScript("__OverlayPlugin_ws_faker({'type': 'broadcast', 'msgtype': 'CombatData', 'msg': " + EventJson.Of(e) + " });");
                         break;
                     case "LogLine":
                         ExecuteScript("__OverlayPlugin_ws_faker({'type': 'broadcast', 'msgtype': 'Chat', 'msg': " + JsonConvert.SerializeObject(e["rawLine"].ToString()) + " });");
                         break;
                     case "ChangeZone":
-                        ExecuteScript("__OverlayPlugin_ws_faker({'type': 'broadcast', 'msgtype': 'ChangeZone', 'msg': " + e.ToString(Formatting.None) + " });");
+                        ExecuteScript("__OverlayPlugin_ws_faker({'type': 'broadcast', 'msgtype': 'ChangeZone', 'msg': " + EventJson.Of(e) + " });");
                         break;
                     case "ChangePrimaryPlayer":
-                        ExecuteScript("__OverlayPlugin_ws_faker({'type': 'broadcast', 'msgtype': 'SendCharName', 'msg': " + e.ToString(Formatting.None) + " });");
+                        ExecuteScript("__OverlayPlugin_ws_faker({'type': 'broadcast', 'msgtype': 'SendCharName', 'msg': " + EventJson.Of(e) + " });");
                         break;
                 }
             }
@@ -361,7 +361,7 @@ namespace RainbowMage.OverlayPlugin.Overlays
                 switch (e["type"].ToString())
                 {
                     case "CombatData":
-                        ExecuteScript("document.dispatchEvent(new CustomEvent('onOverlayDataUpdate', { detail: " + e.ToString(Formatting.None) + " }));");
+                        ExecuteScript("document.dispatchEvent(new CustomEvent('onOverlayDataUpdate', { detail: " + EventJson.Of(e) + " }));");
                         break;
                     case "LogLine":
                         ExecuteScript("document.dispatchEvent(new CustomEvent('onLogLine', { detail: " + JsonConvert.SerializeObject(e["line"].ToString(Formatting.None)) + " }));");

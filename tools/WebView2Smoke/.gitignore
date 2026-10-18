@@ -1,0 +1,5 @@
+# Test output kept next to the tool by mistake (logs are ignored repo-wide): screen captures
+# and the WebView2/CEF data folders of test runs.
+*.png
+cache-*/
+appdata*/

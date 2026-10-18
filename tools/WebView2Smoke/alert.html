@@ -1,0 +1,11 @@
+<!doctype html><html><body style="margin:0;background:transparent">
+<div id="b" style="width:300px;height:200px;background:#e33;visibility:hidden"></div>
+<script>
+// Like raidboss alerts: content shows up from nothing for a while, then goes away.
+const b = document.getElementById('b');
+setInterval(() => {
+  b.style.visibility = 'visible';
+  setTimeout(() => { b.style.visibility = 'hidden'; }, 500);
+}, 1500);
+</script>
+</body></html>

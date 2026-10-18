@@ -1066,7 +1066,9 @@ MaxUploadsPerDay=0
             }
             if (_browser != null && _browser.IsBrowserInitialized)
             {
-                _browser.GetMainFrame().ExecuteJavaScriptAsync(script, "injected");
+                // Fork: disposed, as each frame object otherwise waits for the finalizer (one per event).
+                using (var frame = _browser.GetMainFrame())
+                    frame.ExecuteJavaScriptAsync(script, "injected");
             }
             else
             {

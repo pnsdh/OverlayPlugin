@@ -40,6 +40,9 @@ namespace RainbowMage.OverlayPlugin
             container.Register(new LineSpawnNpcExtra(container));
             container.Register(new LineActorControlExtra(container));
             container.Register(new LineActorControlSelfExtra(container));
+            // Fork, for development: memory layout check against FFXIV_ACT_Plugin (op-selfcheck.enable).
+            if (MemoryProcessors.MemorySelfCheck.Enabled)
+                container.Register(new MemoryProcessors.MemorySelfCheck(container));
         }
     }
 

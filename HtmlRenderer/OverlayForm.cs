@@ -226,6 +226,12 @@ namespace RainbowMage.HtmlRenderer
             }
 
             if (presenter == null) return;
+            // Fork: each read waits for the GPU while holding the presenters' lock (stalling every
+            // GPU overlay's frames): again only when the cursor moved, or the page may have
+            // changed under it.
+            if (cursor == lastHitTest && (DateTime.Now - lastHitTestTime).TotalMilliseconds < 250) return;
+            lastHitTest = cursor;
+            lastHitTestTime = DateTime.Now;
             bool opaque;
             try
             {

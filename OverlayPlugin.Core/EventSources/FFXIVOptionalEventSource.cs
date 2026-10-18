@@ -56,6 +56,15 @@ namespace RainbowMage.OverlayPlugin.EventSources
 
         private void LogLineHandler(bool isImport, LogLineEventArgs args)
         {
+            // Fork, for development (HtmlRenderer.LatencyProbe): from the line's time to here.
+            if (RainbowMage.HtmlRenderer.LatencyProbe.Enabled && !isImport)
+            {
+                var ms = (DateTime.Now - args.detectedTime).TotalMilliseconds;
+                var type = args.detectedType;
+                RainbowMage.HtmlRenderer.LatencyProbe.Add(type >= 256 ? "line time -> OverlayPlugin (OverlayPlugin lines 256+)" : "line time -> OverlayPlugin (game lines)", ms);
+                if (type == 21 || type == 22)
+                    RainbowMage.HtmlRenderer.LatencyProbe.Add("line time -> OverlayPlugin (abilities 21/22)", ms);
+            }
             if (isImport)
             {
                 try
@@ -162,12 +171,17 @@ namespace RainbowMage.OverlayPlugin.EventSources
 
                 // @TODO: Technically this event should work fine for any game, not just FFXIV.
                 // Should it be moved to emit right after attempting the split instead?
-                DispatchEvent(JObject.FromObject(new
+                // Fork: only when something receives it, and built directly (the same JSON) rather
+                // than by reflection, for every log line.
+                if (HasSubscriber(LogLineEvent))
                 {
-                    type = LogLineEvent,
-                    line,
-                    rawLine = args.originalLogLine,
-                }));
+                    DispatchEvent(new JObject
+                    {
+                        ["type"] = LogLineEvent,
+                        ["line"] = new JArray(line),
+                        ["rawLine"] = args.originalLogLine,
+                    });
+                }
             }
             catch (Exception e)
             {

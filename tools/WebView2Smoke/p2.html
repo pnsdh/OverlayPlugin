@@ -1,0 +1,10 @@
+<!doctype html><html><head><style>html,body{margin:0;background:transparent}body{height:2000px}
+#box{position:absolute;left:100px;top:150px;width:200px;height:60px;background:rgba(40,120,255,0.9)}</style></head>
+<body><div id="box"></div>
+<script>
+const box = document.getElementById('box');
+box.addEventListener('click', () => console.log('click on box'));
+box.addEventListener('dblclick', () => console.log('dblclick on box'));
+window.scrollTo(0, 100);
+console.log('scrolled', window.scrollY);
+</script></body></html>

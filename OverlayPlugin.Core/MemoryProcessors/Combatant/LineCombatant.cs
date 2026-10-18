@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -163,6 +164,43 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
         {
             public DateTime lastUpdated;
             public Combatant combatant;
+            // Fork: when a packet from it last made us check it (see MessageReceived).
+            public DateTime lastNetworkCheck;
+        }
+
+        // Fork: the position fields, looked up once rather than on every write.
+        private static readonly FieldInfo[] PositionFields = new[]
+        {
+            typeof(Combatant).GetField(nameof(Combatant.PosX)),
+            typeof(Combatant).GetField(nameof(Combatant.PosY)),
+            typeof(Combatant).GetField(nameof(Combatant.PosZ)),
+            typeof(Combatant).GetField(nameof(Combatant.Heading)),
+        };
+
+        // Fork: a compiled comparison per field, as reflection (boxing both values) ran for every
+        // checked field of every actor 50 times a second.  Compares as before (CompareTo).
+        private static readonly ConcurrentDictionary<FieldInfo, Func<Combatant, Combatant, bool>> fieldEquals =
+            new ConcurrentDictionary<FieldInfo, Func<Combatant, Combatant, bool>>();
+
+        private static Func<Combatant, Combatant, bool> MakeFieldEquals(FieldInfo fi)
+        {
+            var type = fi.FieldType.IsEnum ? Enum.GetUnderlyingType(fi.FieldType) : fi.FieldType;
+            if (!typeof(IComparable).IsAssignableFrom(type))
+            {
+                return (a, b) => fi.GetValue(a).Equals(fi.GetValue(b));
+            }
+            var oldParam = Expression.Parameter(typeof(Combatant));
+            var newParam = Expression.Parameter(typeof(Combatant));
+            // An enum by its underlying value, like Enum.CompareTo, without boxing it.
+            Func<ParameterExpression, Expression> read = (p) =>
+                fi.FieldType.IsEnum ? Expression.Convert(Expression.Field(p, fi), type) : (Expression)Expression.Field(p, fi);
+            var comparerType = typeof(Comparer<>).MakeGenericType(type);
+            var compare = Expression.Call(
+                Expression.Property(null, comparerType.GetProperty(nameof(Comparer<int>.Default))),
+                comparerType.GetMethod(nameof(Comparer<int>.Compare), new[] { type, type }),
+                read(oldParam), read(newParam));
+            return Expression.Lambda<Func<Combatant, Combatant, bool>>(
+                Expression.Equal(compare, Expression.Constant(0)), oldParam, newParam).Compile();
         }
 
         private Func<string, DateTime, bool> logWriter;
@@ -247,9 +285,11 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
 
         private void CheckCombatants(DateTime now, params uint[] filter)
         {
-            var combatants = combatantMemoryManager.GetCombatantList();
+            // Fork: its status effects are never written (IgnoreFieldNames).
+            var combatants = combatantMemoryManager.GetCombatantList(false);
 
             var criteria = CombatantChangeCriteria.Criteria(inCombat);
+            var changed = new HashSet<FieldInfo>();
 
             // Check combatants currently in memory first
             foreach (var combatant in combatants)
@@ -282,7 +322,7 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
 
                 var oldCombatant = oldState.combatant;
                 var lastUpdatedDiff = (now - oldState.lastUpdated).TotalMilliseconds;
-                var changed = new HashSet<FieldInfo>();
+                changed.Clear();
 
                 // Check position/heading first since it has a custom delay timing with threshold
                 // and custom behavior (all position data is written)
@@ -315,10 +355,8 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
                     // If any position data has changed, write all position data
                     if (writePosition)
                     {
-                        changed.Add(combatant.GetType().GetField(nameof(Combatant.PosX)));
-                        changed.Add(combatant.GetType().GetField(nameof(Combatant.PosY)));
-                        changed.Add(combatant.GetType().GetField(nameof(Combatant.PosZ)));
-                        changed.Add(combatant.GetType().GetField(nameof(Combatant.Heading)));
+                        foreach (var fi in PositionFields)
+                            changed.Add(fi);
                     }
                 }
 
@@ -367,6 +405,7 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
             }
 
             // Any combatants no longer in memory, signify that they were removed
+            var inMemory = new HashSet<uint>(combatants.Select((c) => c.ID));
             foreach (var ID in combatantStateMap.Keys)
             {
                 // If we're filtering, only consider removing those in the filters
@@ -374,7 +413,7 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
                 {
                     continue;
                 }
-                if (!combatants.Any((c) => c.ID == ID))
+                if (!inMemory.Contains(ID))
                 {
                     combatantStateMap.TryRemove(ID, out var _);
                     WriteLine(CombatantMemoryChangeType.Remove, ID, "");
@@ -384,22 +423,8 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
 
         private bool ValueEqual(FieldInfo fi, Combatant oldCombatant, Combatant combatant)
         {
-            var oldVal = fi.GetValue(oldCombatant);
-            var newVal = fi.GetValue(combatant);
             // There's some weird behavior with just using `==` or `.Equals` here, where two UInt32 values that are the same somehow aren't.
-            if (oldVal is IComparable)
-            {
-                if (((IComparable)oldVal).CompareTo(newVal) != 0)
-                {
-                    return false;
-                }
-                return true;
-            }
-            if (!oldVal.Equals(newVal))
-            {
-                return false;
-            }
-            return true;
+            return fieldEquals.GetOrAdd(fi, MakeFieldEquals)(oldCombatant, combatant);
         }
 
         private string FormatFieldChange(FieldInfo info, Combatant combatant, bool skipDefaultValues = false)
@@ -457,8 +482,15 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors.Combatant
                     var delayDefault = CombatantChangeCriteria.Criteria(inCombat).DelayDefault;
                     // Also only check if we're beyond the default delay for this ID, or if this ID doesn't exist yet
                     // This check is in place to avoid reading memory every packet, excessively
-                    if (!combatantStateMap.ContainsKey(header.ActorID) || (serverTime - combatantStateMap[header.ActorID].lastUpdated).TotalMilliseconds > delayDefault)
+                    // Fork: and not again within that delay of the last such check: an actor that
+                    // had not changed for longer made every one of its packets read the whole list
+                    // again (the 20ms poll still checks it).
+                    var known = combatantStateMap.TryGetValue(header.ActorID, out var state);
+                    if (!known || ((serverTime - state.lastUpdated).TotalMilliseconds > delayDefault &&
+                                   (serverTime - state.lastNetworkCheck).TotalMilliseconds > delayDefault))
                     {
+                        if (known)
+                            state.lastNetworkCheck = serverTime;
                         CheckCombatants(serverTime, header.ActorID);
                     }
                 }

@@ -1,0 +1,11 @@
+<!doctype html><html><head><style>html,body{margin:0;background:transparent}input{position:absolute;left:20px;top:20px;width:300px;font:20px sans-serif}</style></head>
+<body><input id="i"><script>
+const i = document.getElementById('i');
+i.addEventListener('compositionupdate', (e) => console.log('compositionupdate [' + e.data + '] hasFocus=' + document.hasFocus()));
+i.addEventListener('compositionend', (e) => console.log('compositionend [' + e.data + '] hasFocus=' + document.hasFocus()));
+i.addEventListener('input', () => console.log('input value=' + i.value));
+</script></body></html>
+<script>
+window.addEventListener('blur', () => console.log('window blur, hasFocus=' + document.hasFocus()));
+document.getElementById('i').addEventListener('blur', () => console.log('field blur, hasFocus=' + document.hasFocus()));
+</script>

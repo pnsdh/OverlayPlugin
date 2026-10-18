@@ -296,7 +296,7 @@ namespace RainbowMage.OverlayPlugin
                     return;
                 }
 
-                _conn.Send(e.ToString(Formatting.None));
+                _conn.Send(EventJson.Of(e));
             }
 
             public void OnMessage(string message)
@@ -442,16 +442,16 @@ namespace RainbowMage.OverlayPlugin
                     switch (e["type"].ToString())
                     {
                         case "CombatData":
-                            _conn.Send("{\"type\":\"broadcast\",\"msgtype\":\"CombatData\",\"msg\":" + e.ToString(Formatting.None) + "}");
+                            _conn.Send("{\"type\":\"broadcast\",\"msgtype\":\"CombatData\",\"msg\":" + EventJson.Of(e) + "}");
                             break;
                         case "LogLine":
                             _conn.Send("{\"type\":\"broadcast\",\"msgtype\":\"Chat\",\"msg\":" + JsonConvert.SerializeObject(e["rawLine"].ToString()) + "}");
                             break;
                         case "ChangeZone":
-                            _conn.Send("{\"type\":\"broadcast\",\"msgtype\":\"ChangeZone\",\"msg\":" + e.ToString(Formatting.None) + "}");
+                            _conn.Send("{\"type\":\"broadcast\",\"msgtype\":\"ChangeZone\",\"msg\":" + EventJson.Of(e) + "}");
                             break;
                         case "ChangePrimaryPlayer":
-                            _conn.Send("{\"type\":\"broadcast\",\"msgtype\":\"SendCharName\",\"msg\":" + e.ToString(Formatting.None) + "}");
+                            _conn.Send("{\"type\":\"broadcast\",\"msgtype\":\"SendCharName\",\"msg\":" + EventJson.Of(e) + "}");
                             break;
                     }
                 }
