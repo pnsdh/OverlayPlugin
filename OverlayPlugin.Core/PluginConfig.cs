@@ -585,6 +585,9 @@ namespace RainbowMage.OverlayPlugin
                     if (overlay is OverlayConfigBase config)
                         config.UseWebView2 = true;
                 }
+                // Kept as they were written (their addon not installed): moved when it is.
+                foreach (var overlay in this.unloadedOverlays)
+                    overlay["UseWebView2"] = true;
                 this.PanelsUseWebView2 = true;
                 this.WebView2Moved = true;
                 this.movedToWebView2 = true;

@@ -1081,8 +1081,11 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (provider == null)
                 return null;
             var s = new TtsSettings(provider, config);
+            // An address without its query: a key is sometimes pasted into it.
+            string Shown(TtsField f) =>
+                f.Key == "url" && Uri.TryCreate(s[f.Key], UriKind.Absolute, out var url) ? url.GetLeftPart(UriPartial.Path) : s[f.Key];
             var shown = provider.Fields.Where(f => f.Kind != TtsFieldKind.Secret && f.Kind != TtsFieldKind.Multiline && !string.IsNullOrEmpty(s[f.Key]))
-                .Select(f => $"{f.Key}={s[f.Key]}");
+                .Select(f => $"{f.Key}={Shown(f)}");
             return $"TTS: {provider.Name} [{string.Join(", ", shown)}] speed={config.Speed:0.##}";
         }
 
@@ -1091,15 +1094,22 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             if (error.Contains("paid_plan_required"))
                 return T("This voice needs a paid plan (pick a default voice). ", "이 목소리는 유료 플랜이 필요합니다 (기본 목소리를 고르세요). ");
-            if (error.StartsWith("401") || error.StartsWith("403"))
-                return T("The key is wrong or lacks permission. ", "키가 맞지 않거나 권한이 없습니다. ");
-            if (error.StartsWith("402"))
-                return T("The plan or credits do not allow it. ", "플랜이나 크레딧이 부족합니다. ");
-            if (error.StartsWith("429"))
-                return T("Too many requests or over the limit (try again later). ", "요청이 너무 많거나 한도를 넘었습니다 (잠시 후 다시). ");
-            if (error.StartsWith("404"))
-                return T("Not found (check the model, voice or address). ", "찾을 수 없습니다 (모델, 목소리, 주소 확인). ");
-            return "";
+            // The status, first or after the service's name ("ElevenLabs: 401 Unauthorized: ...").
+            var status = System.Text.RegularExpressions.Regex.Match(error, "(?:^|: )(40[1-4]|429) ").Groups[1].Value;
+            switch (status)
+            {
+                case "401":
+                case "403":
+                    return T("The key is wrong or lacks permission. ", "키가 맞지 않거나 권한이 없습니다. ");
+                case "402":
+                    return T("The plan or credits do not allow it. ", "플랜이나 크레딧이 부족합니다. ");
+                case "429":
+                    return T("Too many requests or over the limit (try again later). ", "요청이 너무 많거나 한도를 넘었습니다 (잠시 후 다시). ");
+                case "404":
+                    return T("Not found (check the model, voice or address). ", "찾을 수 없습니다 (모델, 목소리, 주소 확인). ");
+                default:
+                    return "";
+            }
         }
 
         private void OnSpoken(TtsResult r)
