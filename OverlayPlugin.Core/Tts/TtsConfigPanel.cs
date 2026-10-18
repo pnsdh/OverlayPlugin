@@ -308,6 +308,19 @@ namespace RainbowMage.OverlayPlugin.Tts
                 previewResult.Text = T("making...", "만드는 중...");
                 service.Speak(previewText.Text, TtsSeverity.Alarm, "preview", Lang());
             }));
+            // For asking about an error without a screenshot.
+            row.Controls.Add(Button(T("Copy the result", "결과 복사"), () =>
+            {
+                var text = string.Join(Environment.NewLine, new[] { ProviderLine(), previewSpoken.Text, previewResult.Text }.Where(t => !string.IsNullOrWhiteSpace(t)));
+                try
+                {
+                    Clipboard.SetText(text);
+                }
+                catch (Exception)
+                {
+                    // The clipboard held by another program: nothing copied.
+                }
+            }));
             strip.Controls.Add(row);
             previewSpoken = new Label { AutoSize = true, MaximumSize = new Size(760, 0) };
             strip.Controls.Add(previewSpoken);
@@ -795,7 +808,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                         box.Items.Clear();
                         // The alert language's voices first.
                         var lang = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
-                        foreach (var v in voices.OrderBy(v => v.Lang == lang ? 0 : 1).ThenBy(v => v.Name))
+                        foreach (var v in voices.OrderBy(v => v.Lang == lang ? 0 : 1).ThenBy(v => v.Rank).ThenBy(v => v.Name))
                             box.Items.Add(new Item(v.Name, v.Id));
                         box.Text = current;
                         status.Text = voiceField ? T($"{voices.Count} voices", $"목소리 {voices.Count}개") : T($"{voices.Count} found", $"{voices.Count}개");
@@ -887,6 +900,34 @@ namespace RainbowMage.OverlayPlugin.Tts
                 previewSpoken.Text = T("Read as: ", "읽는 문장: ") + service.ProcessText(previewText.Text, Lang());
         }
 
+        // Which engine and settings (no keys), for a copied result.
+        private string ProviderLine()
+        {
+            var provider = service.Providers.FirstOrDefault(p => p.Id == config.Provider);
+            if (provider == null)
+                return null;
+            var s = new TtsSettings(provider, config);
+            var shown = provider.Fields.Where(f => f.Kind != TtsFieldKind.Secret && f.Kind != TtsFieldKind.Multiline && !string.IsNullOrEmpty(s[f.Key]))
+                .Select(f => $"{f.Key}={s[f.Key]}");
+            return $"TTS: {provider.Name} [{string.Join(", ", shown)}] speed={config.Speed:0.##}";
+        }
+
+        // What a service's error means, before its own words.
+        private string Explain(string error)
+        {
+            if (error.Contains("paid_plan_required"))
+                return T("This voice needs a paid plan (pick a default voice). ", "이 목소리는 유료 플랜이 필요합니다 (기본 목소리를 고르세요). ");
+            if (error.StartsWith("401") || error.StartsWith("403"))
+                return T("The key is wrong or lacks permission. ", "키가 맞지 않거나 권한이 없습니다. ");
+            if (error.StartsWith("402"))
+                return T("The plan or credits do not allow it. ", "플랜이나 크레딧이 부족합니다. ");
+            if (error.StartsWith("429"))
+                return T("Too many requests or over the limit (try again later). ", "요청이 너무 많거나 한도를 넘었습니다 (잠시 후 다시). ");
+            if (error.StartsWith("404"))
+                return T("Not found (check the model, voice or address). ", "찾을 수 없습니다 (모델, 목소리, 주소 확인). ");
+            return "";
+        }
+
         private void OnSpoken(TtsResult r)
         {
             if (IsDisposed || !IsHandleCreated)
@@ -900,7 +941,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                     return;
                 if (r.Error != null && r.MadeMs == 0)
                 {
-                    previewResult.Text = T("Could not say it: ", "읽지 못했습니다: ") + r.Error;
+                    previewResult.Text = T("Could not say it: ", "읽지 못했습니다: ") + Explain(r.Error) + r.Error;
                     return;
                 }
                 previewResult.Text = T($"Made in {r.MadeMs:0} ms, playing {r.StartedMs:0} ms after asked{(r.FromCache ? " (kept from before)" : "")}",

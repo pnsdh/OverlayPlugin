@@ -69,17 +69,34 @@ namespace RainbowMage.OverlayPlugin.Tts
 
     // OpenAI's speech API, and every service and local server that copies it (Kokoro-FastAPI,
     // openedai-speech, LocalAI...): an address, maybe a key, a model and a voice.
-    public class OpenAiCompatibleProvider : RemoteProvider
+    public class OpenAiCompatibleProvider : RemoteProvider, ITtsChoiceSource
     {
+        public IReadOnlyList<string> ListedFields { get; } = new[] { "model" };
+
+        // The server's models that speak ("tts" in the name); all of them when none has it (a
+        // compatible server may name its models otherwise).
+        public IReadOnlyList<TtsVoice> FetchChoices(string field, TtsSettings settings, CancellationToken cancel)
+        {
+            var message = new HttpRequestMessage(HttpMethod.Get, Require(settings, "url", "API address").TrimEnd('/') + "/models");
+            if (!string.IsNullOrWhiteSpace(settings["key"]))
+                message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings["key"].Trim());
+            var json = JToken.Parse(Encoding.UTF8.GetString(TtsHttp.Send(message, cancel)));
+            var all = ((json is JObject o ? o["data"] ?? o["models"] : json) as JArray ?? new JArray())
+                .Select(m => m.Type == JTokenType.String ? (string)m : (string)(m["id"] ?? m["name"]))
+                .Where(m => !string.IsNullOrEmpty(m)).ToList();
+            var speaking = all.Where(m => m.IndexOf("tts", StringComparison.OrdinalIgnoreCase) >= 0).ToList();
+            return (speaking.Count > 0 ? speaking : all).Select(m => new TtsVoice { Id = m, Name = m }).ToList();
+        }
+
         public override string Id => "openai";
         public override string Name => Ko ? "OpenAI 호환" : "OpenAI-compatible";
-        public override string Note => Ko ? "유료 (OpenAI), 내 PC의 호환 서버면 무료" : "paid (OpenAI); free with a compatible server on your PC";
+        public override string Note => Ko ? "유료 (OpenAI), 내 컴퓨터의 호환 서버면 무료" : "paid (OpenAI); free with a compatible server on your computer";
 
         public override IReadOnlyList<TtsField> Fields { get; } = new[]
         {
             Field("url", "API address", "API 주소", def: "https://api.openai.com/v1",
                 hint: "OpenAI, or a compatible server (e.g. http://localhost:8880/v1 for a local Kokoro-FastAPI)",
-                hintKo: "OpenAI, 또는 호환 서버 (예: 내 PC의 Kokoro-FastAPI는 http://localhost:8880/v1)"),
+                hintKo: "OpenAI, 또는 호환 서버 (예: 내 컴퓨터의 Kokoro-FastAPI는 http://localhost:8880/v1)"),
             Field("key", "API key", "API 키", TtsFieldKind.Secret, hint: "Empty for a local server without one", hintKo: "키가 없는 로컬 서버면 비워 두기"),
             Field("model", "Model", "모델", def: "gpt-4o-mini-tts"),
             Field("voice", "Voice", "목소리", def: "alloy"),
@@ -226,7 +243,7 @@ namespace RainbowMage.OverlayPlugin.Tts
     }
 
     // ElevenLabs: many voices (and your own cloned ones); Flash models answer quickly.
-    public class ElevenLabsProvider : RemoteProvider, ITtsUsageSource
+    public class ElevenLabsProvider : RemoteProvider, ITtsChoiceSource, ITtsUsageSource
     {
         // The subscription's characters used and allowed this period, as ElevenLabs counts them.
         public string FetchUsage(TtsSettings settings, CancellationToken cancel)
@@ -280,11 +297,51 @@ namespace RainbowMage.OverlayPlugin.Tts
             var message = new HttpRequestMessage(HttpMethod.Get, "https://api.elevenlabs.io/v1/voices");
             message.Headers.Add("xi-api-key", Require(settings, "key", "API key"));
             var json = JObject.Parse(Encoding.UTF8.GetString(TtsHttp.Send(message, cancel)));
-            return ((JArray)json["voices"] ?? new JArray()).Select(v => new TtsVoice
+            // The default voices work on any plan; ones added from the Voice Library need a paid one.
+            return ((JArray)json["voices"] ?? new JArray()).Select(v =>
             {
-                Id = (string)v["voice_id"],
-                Name = $"{v["name"]} ({v["voice_id"]})",
+                var category = (string)v["category"] ?? "";
+                string kind;
+                int rank;
+                switch (category)
+                {
+                    case "premade":
+                        kind = Ko ? "기본" : "default";
+                        rank = 0;
+                        break;
+                    case "cloned":
+                    case "generated":
+                        kind = Ko ? "직접 만든 목소리" : "your own";
+                        rank = 1;
+                        break;
+                    default:
+                        kind = Ko ? "라이브러리, 유료 플랜 필요" : "library, needs a paid plan";
+                        rank = 2;
+                        break;
+                }
+                return new TtsVoice { Id = (string)v["voice_id"], Name = $"{v["name"]} ({kind})", Rank = rank };
             }).ToList();
+        }
+
+        public IReadOnlyList<string> ListedFields { get; } = new[] { "model" };
+
+        // The models that read text, marked when they cannot read Korean.
+        public IReadOnlyList<TtsVoice> FetchChoices(string field, TtsSettings settings, CancellationToken cancel)
+        {
+            var message = new HttpRequestMessage(HttpMethod.Get, "https://api.elevenlabs.io/v1/models");
+            message.Headers.Add("xi-api-key", Require(settings, "key", "API key"));
+            var json = JToken.Parse(Encoding.UTF8.GetString(TtsHttp.Send(message, cancel)));
+            return (json as JArray ?? new JArray())
+                .Where(m => (bool?)m["can_do_text_to_speech"] ?? true)
+                .Select(m =>
+                {
+                    var id = (string)m["model_id"];
+                    bool korean = ((JArray)m["languages"] ?? new JArray()).Any(l => (string)l["language_id"] == "ko");
+                    var name = $"{m["name"]} ({id})" + (korean ? "" : Ko ? " · 한국어 안 됨" : " · no Korean");
+                    return new TtsVoice { Id = id, Name = name, Rank = korean ? 0 : 1 };
+                })
+                .Where(v => !string.IsNullOrEmpty(v.Id))
+                .ToList();
         }
     }
 

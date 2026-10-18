@@ -79,6 +79,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         public string Name { get; set; }
         // Two-letter language ("ko", "en"...).
         public string Lang { get; set; }
+        // Listed before higher ones (e.g. voices any plan can use first).
+        public int Rank { get; set; }
 
         public override string ToString() => Name;
     }
