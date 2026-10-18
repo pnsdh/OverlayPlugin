@@ -10,6 +10,7 @@
 | `TtsBench` | ACT 없이 플러그인 TTS 시험: 알림 문장 바꾸기 결과, 요청부터 재생까지 걸린 시간(처음/만들어 둔 음성), 겹칠 때 규칙(더 중요한 알림이 끊기, 반복 무시). 기본은 소리 없이(`--volume`으로 소리), `--trace`는 재생 시각. `--supertonic`: 실제로 다운로드해(해시 확인) 한국어 문장 생성 시간·CPU·메모리 측정 후 지움(`--keep`이면 남김, 설치된 모델과 같은 폴더라 주의), 들어 볼 파일은 `%TEMP%\supertonic-test.wav`. `--supertonic-speed`: 다운로드해 둔 모델로 스레드·품질별 속도(읽기만, 지우지 않음). `--requests`: 네트워크 없이 엔진별 요청 본문 확인 |
 | [PatchCheck](PatchCheck/README.md) | 게임 패치 대응: OverlayPlugin·cactbot 메모리 시그니처를 새 게임 exe에서 점검(`scan`)하고 다시 만들기(`regen`). ActPluginRepack의 `FFXIV.Signatures` 라이브러리 사용 |
 | `RenderBench/gpu-kill.ps1` | GPU 프로세스를 8번 강제로 꺼도(한컴 업데이터 상황) 버티는지 시험 |
+| `missing_ko.py` | 한국어 번역(`*.ko-KR.resx`)에 빠졌거나 영어 그대로 남은 설정 화면 문구 목록. 화면 문구를 넣거나 바꾼 뒤 확인 |
 | `build-install.ps1 -Version <설치본 4자리>` | 빌드 → 릴리즈와 같은 구성으로 묶기 → (ACT가 꺼져 있으면) 설치·해시 대조. `-NoInstall`은 묶기까지만 |
 | `OverlayPlugin.Core/MemoryProcessors/MemorySelfCheck.cs` | 게임 패치 뒤 메모리 구조 자가 점검: 메모리에서 읽은 캐릭터 값을 FFXIV_ACT_Plugin 값과 필드별로 비교 (아래) |
 | `HtmlRenderer/LatencyProbe.cs` | 실제 ACT에서 로그 줄이 오버레이에 닿기까지의 지연 측정 (아래) |
