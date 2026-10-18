@@ -12,7 +12,7 @@ dotnet run --project tools\PatchCheck -c Release -- <명령> [옵션]
 | 명령 | 하는 일 |
 | --- | --- |
 | `list [--json <파일>]` | 시그니처를 소스에서 읽어 이름, 오프셋, RIP 여부, 패턴을 보여 줍니다. `--json`은 ActPluginRepack CLI의 `sigscan` / `sigregen --patterns`용 패턴 파일(`out\` 아래면 커밋 안 됨). |
-| `scan [--exe <ffxiv_dx11.exe>] [--region Ko\|Intl\|Cn\|Tc]` | 게임 exe에서 각 시그니처가 몇 곳에 맞는지(코드 섹션 / 플러그인처럼 전체 섹션), 읽은 값이 어느 섹션을 가리키는지, 플러그인의 64KB 단위 읽기에 걸려 잘리는지. 판정은 실제로 쓰이는 것만: OverlayPlugin 각 읽기 클래스의 최신 버전(클래스 번호 655 = 6.55, 74 = 7.4), cactbot은 exe 지역 파일. 기본 exe는 한국 클라이언트. 종료 코드 2 = 깨진 것 있음. |
+| `scan [--exe <ffxiv_dx11.exe>] [--region Ko\|Intl\|Cn\|Tc]` | 게임 exe에서 각 시그니처가 몇 곳에 맞는지(코드 섹션 / 플러그인처럼 전체 섹션), 읽은 값이 어느 섹션을 가리키는지, 플러그인의 64KB 단위 읽기가 놓치는지(일치와 읽을 값이 한 번 읽은 64KB 안에 다 들어와야 찾음). 판정은 실제로 쓰이는 것만: OverlayPlugin 각 읽기 클래스의 최신 버전(클래스 번호 655 = 6.55, 74 = 7.4), cactbot은 exe 지역 파일. 기본 exe는 한국 클라이언트. 종료 코드 2 = 깨진 것 있음. |
 | `regen --old <exe> --new <exe> [--region ...]` | 옛 exe에서 맞던 시그니처를 새 exe용으로 다시 만듭니다(그대로 맞으면 `same`, 새로 만들면 `NEW`와 고칠 소스 파일, 못 만들면 `FAIL`). |
 
 - 시그니처 출처: OverlayPlugin `OverlayPlugin.Core/MemoryProcessors`의 버전별 클래스, cactbot `plugin/CactbotEventSource/FFXIVProcess{Intl,Ko,Cn,Tc}.cs`. cactbot 폴더는 기본으로 이 저장소 옆 `..\cactbot`(`--cactbot`으로 지정).

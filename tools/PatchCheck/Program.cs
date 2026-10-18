@@ -87,11 +87,12 @@ int Scan()
         string where = string.Join(", ", inAll.Take(3).Select(m =>
         {
             var v = SigValue.Resolve(all.Image, m, s.Offset, s.Rip, s.RipOffset);
-            return $"0x{m.Rva:X} -> {(v.ResolvedRva is int r ? $"0x{r:X} {v.Section ?? "outside any section"}" : v.Error)}{(m.CrossesBoundary() ? " CROSSES 64KB" : "")}";
+            return $"0x{m.Rva:X} -> {(v.ResolvedRva is int r ? $"0x{r:X} {v.Section ?? "outside any section"}" : v.Error)}{(m.MissedByChunkedScan(s.Offset, s.Rip) ? " MISSED BY 64KB READS" : "")}";
         }));
         // The plugins take the first match; cactbot refuses several.  A value outside every section,
-        // or a match the runtime's 64KB reads cut in two, is as bad as none.
-        bool bad = inAll.Count != 1 || inAll.Any(m => m.CrossesBoundary() ||
+        // or a match the runtime's 64KB reads miss (the match and the value it reads must fit in one
+        // read, see FFXIVMemory.SigScan), is as bad as none.
+        bool bad = inAll.Count != 1 || inAll.Any(m => m.MissedByChunkedScan(s.Offset, s.Rip) ||
             SigValue.Resolve(all.Image, m, s.Offset, s.Rip, s.RipOffset).Section == null);
         string level = !used ? "    " : bad ? "FAIL" : "OK  ";
         if (used && bad)
