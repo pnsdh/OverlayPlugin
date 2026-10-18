@@ -38,9 +38,10 @@ namespace RainbowMage.OverlayPlugin
         public const int DiscordLimit = 2000;
         public const string DiscordInvite = "https://discord.com/invite/R75tq68bA9";
 
-        string ACTPathPattern;
-        string ACTPathPatternAlt;
         readonly string ACTPathReplace = "<ACT>";
+        // Fork: what Censor hides, each as a pattern matching it however it is written.
+        private Regex actPath;
+        private Regex userName;
 
         private readonly List<string> warnings = new List<string>();
         private readonly List<(string Name, string Version, bool Enabled, string Folder)> plugins = new List<(string, string, bool, string)>();
@@ -96,10 +97,7 @@ namespace RainbowMage.OverlayPlugin
 
         public ClipboardTechSupport(TinyIoCContainer container)
         {
-            string ActAppData = ActGlobals.oFormActMain.AppDataFolder.FullName;
-            string ActAppDataAlt = ActGlobals.oFormActMain.AppDataFolder.FullName.Replace('\\', '/').Replace(" ", "%20");
-            ACTPathPattern = $@"{Regex.Escape(ActAppData)}";
-            ACTPathPatternAlt = $@"{Regex.Escape(ActAppDataAlt)}";
+            SetupCensor(ActGlobals.oFormActMain.AppDataFolder.FullName);
 
             actProcesses = Process.GetProcessesByName("Advanced Combat Tracker");
             if (actProcesses.Length > 1)
@@ -109,14 +107,22 @@ namespace RainbowMage.OverlayPlugin
 
             bool foundFFIXVActPlugin = false;
             bool foundOverlayPlugin = false;
-            string Version(string name) => plugins.FirstOrDefault(p => p.Name == name).Version ?? "?";
 
             foreach (var plugin in ActGlobals.oFormActMain.ActPlugins)
             {
                 var fullPath = plugin.pluginFile.FullName;
-                var version = FileVersionInfo.GetVersionInfo(fullPath);
+                string version;
+                try
+                {
+                    version = FileVersionInfo.GetVersionInfo(fullPath).FileVersion?.ToString() ?? "";
+                }
+                catch (Exception)
+                {
+                    // Moved or deleted since ACT loaded it.
+                    version = "missing";
+                }
                 string folder = Censor(Path.GetDirectoryName(fullPath) ?? "");
-                plugins.Add((plugin.pluginFile.Name, version.FileVersion?.ToString() ?? "", plugin.cbEnabled.Checked, folder));
+                plugins.Add((plugin.pluginFile.Name, version, plugin.cbEnabled.Checked, folder));
 
                 if (plugin.pluginFile.Name.StartsWith("FFXIV_ACT_Plugin", StringComparison.OrdinalIgnoreCase))
                 {
@@ -307,12 +313,38 @@ namespace RainbowMage.OverlayPlugin
             }
         }
 
+        // Fork: ACT's folder and the Windows user name, as paths write them: either slash, spaces as
+        // they are or as %20, letters in any case, non-ASCII letters percent-encoded (as in URLs a
+        // browser reports, e.g. a Korean user name); the name also as the profile folder's (it can
+        // differ after renaming the account).  A generic name (user, admin...) names no one and is
+        // left alone, as hiding it would mangle words.
+        private void SetupCensor(string actFolder)
+        {
+            string Forms(string path)
+            {
+                var slash = path.Replace('\\', '/');
+                var forms = new[] { path, slash, slash.Replace(" ", "%20"), Uri.EscapeUriString(slash) }
+                    .Distinct().OrderByDescending(f => f.Length).Select(Regex.Escape)
+                    // Either slash wherever there was one.
+                    .Select(f => f.Replace(@"\\", "/").Replace("/", @"[\\/]"));
+                return string.Join("|", forms);
+            }
+            actPath = new Regex($"(?:file:///)?(?:{Forms(actFolder.TrimEnd('\\'))})", RegexOptions.IgnoreCase);
+
+            var generic = new[] { "user", "users", "admin", "administrator", "owner", "pc", "public", "default" };
+            var profile = Path.GetFileName(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile).TrimEnd('\\'));
+            var names = new[] { Environment.UserName, profile }
+                .Where(n => !string.IsNullOrEmpty(n) && !generic.Contains(n.ToLowerInvariant()))
+                .SelectMany(n => new[] { n, Uri.EscapeDataString(n) })
+                .Distinct().OrderByDescending(n => n.Length).Select(Regex.Escape).ToList();
+            // As a whole word or path part only (not inside a longer name).
+            userName = names.Count == 0 ? null : new Regex($@"(?<![\w%])(?:{string.Join("|", names)})(?![\w%])", RegexOptions.IgnoreCase);
+        }
+
         private string Censor(string text)
         {
-            text = Regex.Replace(text, ACTPathPattern, ACTPathReplace, RegexOptions.IgnoreCase);
-            text = Regex.Replace(text, ACTPathPatternAlt, ACTPathReplace, RegexOptions.IgnoreCase);
-            text = text.Replace("file:///" + ACTPathReplace, ACTPathReplace);
-            return text.Replace(Environment.UserName, "<USER>");
+            text = actPath.Replace(text, ACTPathReplace);
+            return userName == null ? text : userName.Replace(text, "<USER>");
         }
 
         private static string OnOff(bool on) => on ? "on" : "off";
@@ -369,18 +401,26 @@ namespace RainbowMage.OverlayPlugin
 
         private static string GetGameLanguage(TinyIoCContainer container)
         {
-            var clientFrameworkMemory = container.Resolve<IClientFrameworkMemory>();
-            if (!clientFrameworkMemory.IsValid())
+            try
             {
-                return "unknown";
-            }
+                // Fork: not registered until the plugin's second start phase, or ever if that failed.
+                var clientFrameworkMemory = container.Resolve<IClientFrameworkMemory>();
+                if (!clientFrameworkMemory.IsValid())
+                {
+                    return "unknown";
+                }
 
-            var clientFramework = clientFrameworkMemory.GetClientFramework();
-            if (!clientFramework.foundLanguage)
+                var clientFramework = clientFrameworkMemory.GetClientFramework();
+                if (!clientFramework.foundLanguage)
+                {
+                    return "unknown";
+                }
+                return clientFramework.clientLanguage.ToString();
+            }
+            catch (Exception)
             {
                 return "unknown";
             }
-            return clientFramework.clientLanguage.ToString();
         }
 
         private void GetFFXIVScreenMode(Process process)
@@ -544,7 +584,10 @@ namespace RainbowMage.OverlayPlugin
         {
             if (url.StartsWith("http", StringComparison.OrdinalIgnoreCase))
                 return Regex.Replace(url, "^https?://", "");
-            int slash = url.LastIndexOfAny(new[] { '/', '\\' });
+            // The last part of the path (the query may have slashes of its own, e.g. a ws:// URL).
+            int query = url.IndexOfAny(new[] { '?', '#' });
+            string path = query >= 0 ? url.Substring(0, query) : url;
+            int slash = path.LastIndexOfAny(new[] { '/', '\\' });
             return slash >= 0 ? url.Substring(slash + 1) : url;
         }
 

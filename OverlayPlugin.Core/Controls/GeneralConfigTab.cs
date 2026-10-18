@@ -289,13 +289,21 @@ namespace RainbowMage.OverlayPlugin
 
         private void btnClipboardTechSupport_Click(object sender, EventArgs e)
         {
-            var info = new ClipboardTechSupport(this.container);
-            int length = info.CopyToClipboard();
-            // Fork: say it worked, and where to paste it.
+            // Fork: say whether it worked, and where to paste it.
             var ko = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko";
-            lblCopied.Text = ko
-                ? $"복사했습니다 ({length}자). 디스코드에 붙여 넣으세요."
-                : $"Copied ({length} characters). Paste it in Discord.";
+            try
+            {
+                var info = new ClipboardTechSupport(this.container);
+                int length = info.CopyToClipboard();
+                lblCopied.Text = ko
+                    ? $"복사했습니다 ({length}자). 디스코드에 붙여 넣으세요."
+                    : $"Copied ({length} characters). Paste it in Discord.";
+            }
+            catch (Exception ex)
+            {
+                // E.g. another program holding the clipboard.
+                lblCopied.Text = (ko ? "복사하지 못했습니다: " : "Could not copy: ") + ex.Message;
+            }
             lblCopied.Visible = true;
         }
 
