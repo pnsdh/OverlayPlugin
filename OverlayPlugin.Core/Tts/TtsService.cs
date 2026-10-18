@@ -64,6 +64,9 @@ namespace RainbowMage.OverlayPlugin.Tts
         // For the settings' preview: how the last speech went.
         public event Action<TtsResult> Spoken;
 
+        // How the chosen slow voice did since ACT started (see TtsStats).
+        public TtsStats Stats { get; } = new TtsStats();
+
         // The volume of all speech set from outside the settings (cactbot's config).
         public event Action VolumeChanged;
 
@@ -488,8 +491,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             Report(request, Ms(request.Asked, made), Ms(request.Asked, now));
         }
 
-        private void Report(Request request, double made, double started) =>
+        private void Report(Request request, double made, double started)
+        {
+            if (!request.Preview && request.SlowVoice != null)
+                Stats.Read(request.SlowVoice, request.FromCache, request.FellBack, request.Paused, request.Error != null && !request.Paused);
             Spoken?.Invoke(new TtsResult(request.Text, request.Spoken, made, started, request.FromCache, request.FellBack, request.Error, request.Preview));
+        }
 
         // The next in line, made while something plays, so it starts as soon as that ends.
         private void MakeAhead()
@@ -515,7 +522,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                         if (saved != null)
                             Keep(plan.Key, saved, null);
                         else if (PausedFor(plan.Provider) == null)
-                            Fetch(plan);
+                            Fetch(plan, true);
                         // Over its limit: Windows' voice made ahead instead.
                         else
                             ahead.Clip = Make(ahead);
@@ -574,7 +581,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         }
 
         // A slow voice's speech, fetched once however many ask (kept in memory and on disk).
-        private Task<TtsClip> Fetch(Planned plan)
+        // counted: an alert's (not the preview's), for the stats.
+        private Task<TtsClip> Fetch(Planned plan, bool counted)
         {
             lock (fetching)
             {
@@ -587,9 +595,12 @@ namespace RainbowMage.OverlayPlugin.Tts
                         ThrowIfPaused(plan.Provider);
                         Usage.Check(plan.Provider, plan.Synthesis.Text);
                         TtsClip clip = null;
+                        var took = Stopwatch.StartNew();
                         try
                         {
                             clip = plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None);
+                            if (counted)
+                                Stats.Made(plan.Provider.Name, took.Elapsed.TotalMilliseconds);
                         }
                         catch (Exception e)
                         {
@@ -750,6 +761,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             }
             if (!plan.Provider.IsSlow)
                 return Keep(plan.Key, plan.Provider.Synthesize(plan.Synthesis, CancellationToken.None), null);
+            request.SlowVoice = plan.Provider.Name;
 
             kept = disk.Get(plan.Key);
             if (kept != null)
@@ -762,12 +774,13 @@ namespace RainbowMage.OverlayPlugin.Tts
             var pause = PausedFor(plan.Provider);
             if (pause != null)
             {
+                request.Paused = true;
                 request.Error = PausedText(plan.Provider, pause.Value);
                 return request.Preview ? null : WindowsInstead(request, plan.Synthesis.Lang);
             }
             // Slow: not waited for longer than the fallback time; when late it is kept for next time.
             // The preview waits for it (that is what is being tried) and says why when it fails.
-            var fetch = Fetch(plan);
+            var fetch = Fetch(plan, !request.Preview);
             bool inTime;
             try
             {
@@ -798,6 +811,7 @@ namespace RainbowMage.OverlayPlugin.Tts
             catch (AggregateException e)
             {
                 var why = e.GetBaseException().Message;
+                request.Paused = e.GetBaseException() is TtsLimitException;
                 request.Error = why.StartsWith(plan.Provider.Name + ": ") ? why : $"{plan.Provider.Name}: {why}";
                 LogError(request.Error);
                 return request.Preview ? null : WindowsInstead(request, plan.Synthesis.Lang);
@@ -923,7 +937,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             var p = PausedFor(provider);
             if (p != null)
-                throw new InvalidOperationException(PausedText(provider, p.Value));
+                throw new TtsLimitException(PausedText(provider, p.Value));
         }
 
         // "Too many requests" (429): paused as long as the service says (or a minute); out of
@@ -1037,6 +1051,9 @@ namespace RainbowMage.OverlayPlugin.Tts
             public string Lang;
             // The sender's own volume (0 to 1), if it gave one.
             public double? Gain;
+            // A slow voice's name, when one made it (for the stats); whether it was paused.
+            public string SlowVoice;
+            public bool Paused;
             public long Asked;
             public TtsClip Clip;
             public bool Tried;

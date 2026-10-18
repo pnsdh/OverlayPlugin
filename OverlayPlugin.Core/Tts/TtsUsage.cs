@@ -121,7 +121,7 @@ namespace RainbowMage.OverlayPlugin.Tts
                 pending.TryGetValue(provider.Id, out long sending);
                 if (usage.MonthlyLimit > 0 && usage.Chars + sending + text.Length > usage.MonthlyLimit)
                 {
-                    throw new InvalidOperationException(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
+                    throw new TtsLimitException(CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko"
                         ? $"이번 달 한도({usage.MonthlyLimit:N0}자)에 닿아 Windows 음성으로 읽습니다"
                         : $"this month's limit ({usage.MonthlyLimit:N0} characters) is reached: Windows' voice reads instead");
                 }

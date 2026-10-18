@@ -282,6 +282,8 @@ static class Program
         tts2.Resume(tts2.Provider);
         Show("after trying again", Say("한도 문장 셋"));
         Console.WriteLine($"  requests after trying again: {requests - beforeLimit}{(requests - beforeLimit == 1 ? "" : " FAIL")}");
+        // What came of the alerts (the preview not counted).
+        Console.WriteLine("  stats: " + tts2.Stats.Describe().Replace("\n", "\n         "));
         tts2.Dispose();
         listener.Stop();
         Console.WriteLine($"  disk cache: {cacheDir}");

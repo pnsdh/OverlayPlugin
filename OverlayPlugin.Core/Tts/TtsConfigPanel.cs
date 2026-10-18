@@ -19,6 +19,7 @@ namespace RainbowMage.OverlayPlugin.Tts
         private readonly ActTtsBridge bridge;
         private readonly IPluginConfig pluginConfig;
         private TrackBar masterBar;
+        private Label statsLabel;
         private Label paidNote;
         private readonly TtsConfig config;
         private Label owner;
@@ -62,7 +63,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             service.VolumeChanged += OnVolumeChanged;
             service.PausedChanged += OnUsageChanged;
             ownerTimer = new Timer { Interval = 2000 };
-            ownerTimer.Tick += (o, e) => ShowOwner();
+            ownerTimer.Tick += (o, e) =>
+            {
+                ShowOwner();
+                if (tabs?.SelectedTab == madePage)
+                    ShowStats();
+            };
             VisibleChanged += (o, e) =>
             {
                 ownerTimer.Enabled = Visible;
@@ -199,6 +205,23 @@ namespace RainbowMage.OverlayPlugin.Tts
             network.Controls.Add(localPrepare);
             prepared = Hint("");
             network.Controls.Add(prepared);
+            // How it did this session: whether making ahead is needed.
+            network.Controls.Add(new Label
+            {
+                Text = T("This session", "이번 접속 통계"),
+                AutoSize = true,
+                Font = new Font(Font, FontStyle.Bold),
+                Margin = new Padding(3, 10, 3, 3),
+            });
+            statsLabel = new Label { AutoSize = true, MaximumSize = new Size(700, 0), Margin = new Padding(3, 0, 3, 3) };
+            network.Controls.Add(statsLabel);
+            network.Controls.Add(Hint(T("Made speech: made before (ahead, or heard before). Made in time: within the fallback time. To see whether making ahead is needed, play with it off and look here.",
+                "만들어 둔 음성: 미리 만들었거나 전에 한 번 읽어서 저장된 것. 제시간: 대신 읽기 기준 시간 안에 만든 것. 미리 만들기가 필요한지 보려면 끄고 한 판 돌아 본 뒤 여기를 보세요.")));
+            network.Controls.Add(Button(T("Reset the stats", "통계 초기화"), () =>
+            {
+                service.Stats.Reset();
+                ShowStats();
+            }));
             // A paid voice's usage (made again with the provider's fields).
             usagePanel = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
             network.Controls.Add(usagePanel);
@@ -207,7 +230,10 @@ namespace RainbowMage.OverlayPlugin.Tts
             tabs.SelectedIndexChanged += (o, e) =>
             {
                 if (tabs.SelectedTab == madePage)
+                {
                     RefreshMade();
+                    ShowStats();
+                }
             };
 
             ShowOwner();
@@ -1028,6 +1054,12 @@ namespace RainbowMage.OverlayPlugin.Tts
                     $"만드는 데 {r.MadeMs:0}ms, 요청부터 재생까지 {r.StartedMs:0}ms{(r.FromCache ? " (만들어 둔 음성)" : "")}") +
                     (r.FellBack ? T(" - Windows' voice instead: ", " · Windows 음성으로 대신 읽음: ") + (r.Error ?? T("slower than the fallback time (kept for next time)", "대신 읽기 시간보다 늦음 (다음부터는 받은 음성으로)")) : "");
             }));
+        }
+
+        private void ShowStats()
+        {
+            if (statsLabel != null && !statsLabel.IsDisposed)
+                statsLabel.Text = service.Stats.Describe();
         }
 
         // Set in cactbot's config: shown here too.
