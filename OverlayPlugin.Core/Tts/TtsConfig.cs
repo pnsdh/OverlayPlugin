@@ -42,7 +42,7 @@ namespace RainbowMage.OverlayPlugin.Tts
 
         // A voice over the network not ready this soon: Windows' voice says it now (the network's
         // is kept for next time).
-        public int FallbackMs { get; set; } = 800;
+        public int FallbackMs { get; set; } = 1000;
 
         // On entering a zone, its alerts (as an overlay lists them) fetched ahead from a network
         // voice, so even the first time an alert plays at once.
