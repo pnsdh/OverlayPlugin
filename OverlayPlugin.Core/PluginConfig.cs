@@ -86,7 +86,8 @@ namespace RainbowMage.OverlayPlugin
             }
         }
 
-        // Fork: config panels (e.g. cactbot's) drawn by WebView2 too.  Applied when ACT starts.
+        // Fork: config panels (e.g. cactbot's) drawn by WebView2 too (the default; CEF when the
+        // runtime can't be used).  Applied when ACT starts.
         private bool _panelsUseWebView2;
         public bool PanelsUseWebView2
         {
@@ -348,7 +349,7 @@ namespace RainbowMage.OverlayPlugin
             this.HideOverlayDuringCutscene = false;
             this.ErrorReports = false;
             this.UseGpu = false;
-            this.PanelsUseWebView2 = false;
+            this.PanelsUseWebView2 = true;
             this.UpdateCheck = true;
             this.IsFirstLaunch = true;
 
