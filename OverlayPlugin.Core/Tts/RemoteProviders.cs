@@ -265,8 +265,10 @@ namespace RainbowMage.OverlayPlugin.Tts
                 ["model_id"] = Require(s, "model", "model"),
                 ["voice_settings"] = new JObject { ["speed"] = Math.Round(Clamp(request.Speed), 2) },
             };
-            if (!string.IsNullOrEmpty(request.Lang))
-                body["language_code"] = request.Lang;
+            // Only the v2.5 models take a language (the others answer an error when given one).
+            var model = (string)body["model_id"];
+            if (!string.IsNullOrEmpty(request.Lang) && model.IndexOf("v2_5", StringComparison.OrdinalIgnoreCase) >= 0)
+                body["language_code"] = request.Lang == "cn" ? "zh" : request.Lang;
             var url = $"https://api.elevenlabs.io/v1/text-to-speech/{Uri.EscapeDataString(Require(s, "voice", "voice ID"))}?output_format=pcm_24000";
             var message = Json(HttpMethod.Post, url, body);
             message.Headers.Add("xi-api-key", Require(s, "key", "API key"));
