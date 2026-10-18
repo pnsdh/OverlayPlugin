@@ -188,7 +188,8 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors
             Check("CastBuffID", m.CastBuffID, p.CastBuffID);
             Check("CastTargetID", Id(m.CastTargetID), Id(p.CastTargetID));
             Check("CastDurationMax", m.CastDurationMax, p.CastDurationMax, 0.05f);
-            // The cast flags moved inside the struct in 7.5 with the signature unchanged.
+            // Cast flags can change inside the struct with the signature unchanged (7.5 merged two
+            // into one byte; upstream noticed six weeks later, PR #540).
             Check("IsCasting", m.IsCasting1 != 0, p.IsCasting);
             if (!HpTypes.Contains((byte)m.Type))
                 return;
