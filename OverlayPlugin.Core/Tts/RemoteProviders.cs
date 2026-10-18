@@ -58,6 +58,29 @@ namespace RainbowMage.OverlayPlugin.Tts
         protected static TtsField Field(string key, string label, string labelKo, TtsFieldKind kind = TtsFieldKind.Text, string def = "", string hint = null, string hintKo = null, string[] choices = null) =>
             new TtsField { Key = key, Label = label, LabelKo = labelKo, Kind = kind, Default = def, Hint = hint, HintKo = hintKo, Choices = choices };
 
+        // A choice whose first value, "", leaves it to the service (or the voice's own setting).
+        // Values and names as "value=name in English=name in Korean".
+        protected static TtsField Pick(string key, string label, string labelKo, string hint, string hintKo, params string[] choices)
+        {
+            var parts = choices.Select(c => c.Split('=')).ToList();
+            return new TtsField
+            {
+                Key = key,
+                Label = label,
+                LabelKo = labelKo,
+                Kind = TtsFieldKind.Choice,
+                Default = "",
+                Hint = hint,
+                HintKo = hintKo,
+                Choices = parts.Select(p => p[0]).ToArray(),
+                ChoiceNames = parts.Select(p => p.Length > 1 ? p[1] : p[0]).ToArray(),
+                ChoiceNamesKo = parts.Select(p => p.Length > 2 ? p[2] : p.Length > 1 ? p[1] : p[0]).ToArray(),
+            };
+        }
+
+        protected static double? Number(TtsSettings s, string key) =>
+            double.TryParse(s[key], NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : (double?)null;
+
         protected static string Require(TtsSettings settings, string key, string what)
         {
             var value = settings[key];
@@ -159,6 +182,10 @@ namespace RainbowMage.OverlayPlugin.Tts
             Field("key", "Key", "키", TtsFieldKind.Secret, hint: "Azure portal > Speech resource > Keys", hintKo: "Azure 포털 > Speech 리소스 > 키"),
             Field("voice", "Voice", "목소리", def: "ko-KR-SunHiNeural"),
             Field("style", "Style (voices that have it)", "말투 (지원하는 목소리만)", hint: "e.g. cheerful, serious; empty for none", hintKo: "예: cheerful, serious. 비우면 기본"),
+            Pick("styledegree", "How strongly", "말투 강도", "With a style only", "말투를 정했을 때만",
+                "=Normal=보통", "0.5=Weaker (0.5)=약하게 (0.5)", "1.5=Stronger (1.5)=강하게 (1.5)", "2=Strongest (2)=가장 강하게 (2)"),
+            Pick("pitch", "Pitch", "음높이", null, null,
+                "=Normal=보통", "-20%=Lower (-20%)=낮게 (-20%)", "-10%", "+10%", "+20%=Higher (+20%)=높게 (+20%)"),
         };
 
         private static string Host(TtsSettings s) => $"https://{Require(s, "region", "region")}.tts.speech.microsoft.com";
@@ -169,9 +196,13 @@ namespace RainbowMage.OverlayPlugin.Tts
             var voice = Require(s, "voice", "voice");
             var lang = voice.Length >= 5 ? voice.Substring(0, 5) : "ko-KR";
             string rate = ((int)Math.Round((Clamp(request.Speed) - 1) * 100)).ToString("+0;-0", CultureInfo.InvariantCulture) + "%";
-            string text = $"<prosody rate=\"{rate}\">{SecurityElement.Escape(request.Text)}</prosody>";
+            string pitch = string.IsNullOrEmpty(s["pitch"]) ? "" : $" pitch=\"{SecurityElement.Escape(s["pitch"])}\"";
+            string text = $"<prosody rate=\"{rate}\"{pitch}>{SecurityElement.Escape(request.Text)}</prosody>";
             if (!string.IsNullOrWhiteSpace(s["style"]))
-                text = $"<mstts:express-as style=\"{SecurityElement.Escape(s["style"].Trim())}\">{text}</mstts:express-as>";
+            {
+                string degree = string.IsNullOrEmpty(s["styledegree"]) ? "" : $" styledegree=\"{SecurityElement.Escape(s["styledegree"])}\"";
+                text = $"<mstts:express-as style=\"{SecurityElement.Escape(s["style"].Trim())}\"{degree}>{text}</mstts:express-as>";
+            }
             var ssml = $"<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xmlns:mstts=\"https://www.w3.org/2001/mstts\" xml:lang=\"{lang}\"><voice name=\"{SecurityElement.Escape(voice)}\">{text}</voice></speak>";
             var message = new HttpRequestMessage(HttpMethod.Post, Host(s) + "/cognitiveservices/v1")
             {
@@ -207,6 +238,8 @@ namespace RainbowMage.OverlayPlugin.Tts
         {
             Field("key", "API key", "API 키", TtsFieldKind.Secret, hint: "Google Cloud console > APIs > Credentials (Text-to-Speech API enabled)", hintKo: "Google Cloud 콘솔 > API 및 서비스 > 사용자 인증 정보 (Text-to-Speech API 사용 설정)"),
             Field("voice", "Voice", "목소리", def: "ko-KR-Neural2-A"),
+            Pick("pitch", "Pitch (semitones)", "음높이 (반음)", "Not for Chirp 3 HD voices", "Chirp 3 HD 목소리는 지원 안 함",
+                "=Normal=보통", "-4=Lower (-4)=낮게 (-4)", "-2", "2", "4=Higher (4)=높게 (4)"),
         };
 
         public override TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel)
@@ -224,6 +257,8 @@ namespace RainbowMage.OverlayPlugin.Tts
                     ["speakingRate"] = Math.Round(Clamp(request.Speed), 2),
                 },
             };
+            if (Number(s, "pitch") is double pitch)
+                body["audioConfig"]["pitch"] = pitch;
             var url = "https://texttospeech.googleapis.com/v1/text:synthesize?key=" + Uri.EscapeDataString(Require(s, "key", "API key"));
             var json = JObject.Parse(Encoding.UTF8.GetString(TtsHttp.Send(Json(HttpMethod.Post, url, body), cancel)));
             return TtsAudio.Decode(Convert.FromBase64String((string)json["audioContent"] ?? ""));
@@ -271,20 +306,44 @@ namespace RainbowMage.OverlayPlugin.Tts
             Field("key", "API key", "API 키", TtsFieldKind.Secret, hint: "elevenlabs.io > Developers > API Keys", hintKo: "elevenlabs.io > Developers > API Keys"),
             Field("voice", "Voice ID", "목소리 ID", hint: "Fetch the list, or paste a voice's ID", hintKo: "목록을 불러오거나 목소리 ID 붙여 넣기"),
             Field("model", "Model", "모델", def: "eleven_flash_v2_5"),
+            Field("direction", "Acting direction before each alert (v3, v4 models)", "알림마다 앞에 붙일 연기 지시 (v3, v4 모델만)",
+                hint: "e.g. [excited], [shouts], [whispers], [said calmly]; not sent to other models (they would read it out)",
+                hintKo: "예: [excited], [shouts], [whispers], [said calmly]. 다른 모델은 이 글자를 그대로 읽어 버려서 보내지 않음"),
+            Pick("stability", "Stability", "안정성", "v3 takes only these three", "v3 모델은 이 세 값만 받음",
+                "=The voice's own=목소리 설정 따름", "0=0 (wider emotion)=0 (감정 크게)", "0.5", "1=1 (steady)=1 (차분하고 일정하게)"),
+            Pick("similarity", "Likeness to the voice", "원래 목소리와 닮은 정도", null, null,
+                "=The voice's own=목소리 설정 따름", "0.25", "0.5", "0.75", "1"),
+            Pick("style", "Style exaggeration", "말투 과장", "Above 0 takes longer to make", "0보다 크면 만드는 시간이 늘어남",
+                "=The voice's own=목소리 설정 따름", "0=0 (off)=0 (끔)", "0.25", "0.5", "0.75", "1=1 (most)=1 (가장 세게)"),
+            Pick("boost", "Speaker boost", "화자 강조", "On takes a little longer", "켜면 조금 느려짐",
+                "=The voice's own=목소리 설정 따름", "true=On=켜기", "false=Off=끄기"),
         };
 
         public override TtsClip Synthesize(TtsSynthesis request, CancellationToken cancel)
         {
             var s = request.Settings;
+            var model = Require(s, "model", "model");
+            bool acts = model.IndexOf("v3", StringComparison.OrdinalIgnoreCase) >= 0 || model.IndexOf("v4", StringComparison.OrdinalIgnoreCase) >= 0;
+            var text = acts && !string.IsNullOrWhiteSpace(s["direction"]) ? s["direction"].Trim() + " " + request.Text : request.Text;
+            var settings = new JObject { ["speed"] = Math.Round(Clamp(request.Speed), 2) };
+            if (Number(s, "stability") is double stability)
+                settings["stability"] = stability;
+            if (Number(s, "similarity") is double similarity)
+                settings["similarity_boost"] = similarity;
+            if (Number(s, "style") is double style)
+                settings["style"] = style;
+            if (bool.TryParse(s["boost"], out var boost))
+                settings["use_speaker_boost"] = boost;
             var body = new JObject
             {
-                ["text"] = request.Text,
-                ["model_id"] = Require(s, "model", "model"),
-                ["voice_settings"] = new JObject { ["speed"] = Math.Round(Clamp(request.Speed), 2) },
+                ["text"] = text,
+                ["model_id"] = model,
+                ["voice_settings"] = settings,
             };
-            // Only the v2.5 models take a language (the others answer an error when given one).
-            var model = (string)body["model_id"];
-            if (!string.IsNullOrEmpty(request.Lang) && model.IndexOf("v2_5", StringComparison.OrdinalIgnoreCase) >= 0)
+            // The v2 multilingual and English-only models answer an error when given a language.
+            bool takesLang = model.IndexOf("multilingual_v2", StringComparison.OrdinalIgnoreCase) < 0 &&
+                model.IndexOf("monolingual", StringComparison.OrdinalIgnoreCase) < 0;
+            if (!string.IsNullOrEmpty(request.Lang) && takesLang)
                 body["language_code"] = request.Lang == "cn" ? "zh" : request.Lang;
             var url = $"https://api.elevenlabs.io/v1/text-to-speech/{Uri.EscapeDataString(Require(s, "voice", "voice ID"))}?output_format=pcm_24000";
             var message = Json(HttpMethod.Post, url, body);
@@ -434,6 +493,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             Field("id", "Client ID", "Client ID", hint: "NAVER Cloud console > Application (CLOVA Voice selected)", hintKo: "네이버 클라우드 콘솔 > Application 등록 (CLOVA Voice 선택)"),
             Field("key", "Client Secret", "Client Secret", TtsFieldKind.Secret),
             Field("voice", "Speaker", "목소리 (speaker)", def: "nara", hint: "e.g. nara, nminyoung, vdain, ndain", hintKo: "예: nara, nminyoung, vdain, ndain"),
+            Pick("pitch", "Pitch", "음높이", null, null,
+                "=Normal=보통", "-4=Higher (-4)=높게 (-4)", "-2", "2", "4=Lower (4)=낮게 (4)"),
+            Pick("emotion", "Emotion (speakers that have it)", "감정 (지원하는 목소리만)", "e.g. vdain, vgoeun, vyuna", "예: vdain, vgoeun, vyuna",
+                "=None=기본", "0=Neutral=중립", "1=Sad=슬픔", "2=Happy=기쁨", "3=Angry=분노"),
+            Pick("emotion-strength", "How strongly", "감정 강도", "With an emotion only", "감정을 정했을 때만",
+                "=Normal=보통", "0=Weak=약하게", "1=Normal (1)=보통 (1)", "2=Strong=강하게"),
         };
 
         public override IReadOnlyList<TtsVoice> GetVoices(TtsSettings settings)
@@ -456,7 +521,9 @@ namespace RainbowMage.OverlayPlugin.Tts
                     ["speed"] = speed.ToString(CultureInfo.InvariantCulture),
                     ["format"] = "wav",
                     ["sampling-rate"] = "24000",
-                }),
+                }.Concat(new[] { "pitch", "emotion", "emotion-strength" }
+                    .Where(k => !string.IsNullOrEmpty(s[k]))
+                    .Select(k => new KeyValuePair<string, string>(k, s[k])))),
             };
             message.Headers.Add("X-NCP-APIGW-API-KEY-ID", Require(s, "id", "Client ID"));
             message.Headers.Add("X-NCP-APIGW-API-KEY", Require(s, "key", "Client Secret"));

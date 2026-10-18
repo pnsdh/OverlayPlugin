@@ -12,6 +12,7 @@ using RainbowMage.OverlayPlugin.Tts;
 // important alert cutting in, repeats dropped).  Silent unless --volume is given.
 //
 // TtsBench.exe [--volume 0-100] [--voice <name>] [--text "..."]
+// TtsBench.exe --requests    what each network service is sent, with every option set (no network)
 // Needs the plugin built (out\Release\libs).
 static class Program
 {
@@ -35,6 +36,8 @@ static class Program
         if (args.Contains("--supertonic"))
             return SupertonicTest(args.Contains("--keep"));
         Console.OutputEncoding = System.Text.Encoding.UTF8;
+        if (args.Contains("--requests"))
+            return RequestsTest();
         string Opt(string name) => args.SkipWhile(a => a != name).Skip(1).FirstOrDefault();
         int volume = int.TryParse(Opt("--volume"), out var v) ? v : 0;
 
@@ -260,6 +263,86 @@ static class Program
     // Supertonic end to end: the download (each file checked), loading, then Korean alerts: how
     // long each takes (first and again), how long the speech is, whether it is sound (not silence
     // or NaN), and the process' memory.  The download is deleted afterwards unless --keep.
+    // Every network service's request with its options set, answered here (a short silence in
+    // the shape each one answers in), so the bodies can be checked against the services' docs.
+    static int RequestsTest()
+    {
+        var silence = new byte[4800];
+        byte[] Wav()
+        {
+            var ms = new MemoryStream();
+            var w = new BinaryWriter(ms);
+            w.Write(System.Text.Encoding.ASCII.GetBytes("RIFF"));
+            w.Write(36 + silence.Length);
+            w.Write(System.Text.Encoding.ASCII.GetBytes("WAVEfmt "));
+            w.Write(16);
+            w.Write((short)1);
+            w.Write((short)1);
+            w.Write(24000);
+            w.Write(48000);
+            w.Write((short)2);
+            w.Write((short)16);
+            w.Write(System.Text.Encoding.ASCII.GetBytes("data"));
+            w.Write(silence.Length);
+            w.Write(silence);
+            return ms.ToArray();
+        }
+        string seen = null;
+        var field = typeof(TtsHttp).GetField("Intercept", BindingFlags.NonPublic | BindingFlags.Static);
+        field.SetValue(null, (Func<System.Net.Http.HttpRequestMessage, byte[]>)(request =>
+        {
+            var body = request.Content == null ? "" : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            var headers = string.Join(", ", request.Headers.Select(h => h.Key + (h.Key.ToLowerInvariant().Contains("key") || h.Key == "Authorization" ? "=***" : "=" + string.Join(",", h.Value))));
+            seen = $"{request.Method} {System.Text.RegularExpressions.Regex.Replace(request.RequestUri.ToString(), "key=[^&]+", "key=***")}\n  headers: {headers}\n  body: {body}";
+            var host = request.RequestUri.Host;
+            if (host.Contains("texttospeech"))
+                return System.Text.Encoding.UTF8.GetBytes("{\"audioContent\":\"" + Convert.ToBase64String(Wav()) + "\"}");
+            if (host.Contains("generativelanguage"))
+                return System.Text.Encoding.UTF8.GetBytes("{\"candidates\":[{\"content\":{\"parts\":[{\"inlineData\":{\"data\":\"" + Convert.ToBase64String(silence) + "\"}}]}}]}");
+            if (host.Contains("elevenlabs"))
+                return silence;
+            return Wav();
+        }));
+
+        var cases = new (string Provider, Dictionary<string, string> Settings)[]
+        {
+            ("azure", new Dictionary<string, string> { ["key"] = "k", ["style"] = "cheerful", ["styledegree"] = "1.5", ["pitch"] = "+10%" }),
+            ("google", new Dictionary<string, string> { ["key"] = "k", ["pitch"] = "-2" }),
+            ("gemini", new Dictionary<string, string> { ["key"] = "k", ["style"] = "흥분한 말투로" }),
+            ("elevenlabs", new Dictionary<string, string> { ["key"] = "k", ["voice"] = "pNInz6obpgDQGcFmaJgB", ["model"] = "eleven_v4", ["direction"] = "[excited]", ["stability"] = "0", ["similarity"] = "0.75", ["style"] = "0.5", ["boost"] = "false" }),
+            ("elevenlabs", new Dictionary<string, string> { ["key"] = "k", ["voice"] = "pNInz6obpgDQGcFmaJgB", ["model"] = "eleven_multilingual_v2", ["direction"] = "[excited]" }),
+            ("elevenlabs", new Dictionary<string, string> { ["key"] = "k", ["voice"] = "pNInz6obpgDQGcFmaJgB" }),
+            ("openai", new Dictionary<string, string> { ["key"] = "k", ["instructions"] = "calm" }),
+            ("clova", new Dictionary<string, string> { ["id"] = "i", ["key"] = "k", ["voice"] = "vdain", ["pitch"] = "-2", ["emotion"] = "2", ["emotion-strength"] = "1" }),
+            ("clova", new Dictionary<string, string> { ["id"] = "i", ["key"] = "k" }),
+        };
+        int failed = 0;
+        var container = new TinyIoCContainer();
+        container.Register<ILogger>(new Logger());
+        using (var service = new TtsService(container, new TtsConfig()))
+        {
+            foreach (var c in cases)
+            {
+                var provider = service.Providers.First(p => p.Id == c.Provider);
+                var config = new TtsConfig();
+                config.ProviderSettings[c.Provider] = c.Settings.ToDictionary(kv => kv.Key, kv => kv.Key == "key" ? TtsSecrets.Protect(kv.Value) : kv.Value);
+                var s = new TtsSettings(provider, config);
+                try
+                {
+                    var clip = provider.Synthesize(new TtsSynthesis { Text = "보스와 멀리 떨어지기", Speed = 1.2, Lang = "ko", Settings = s }, CancellationToken.None);
+                    Console.WriteLine($"[{c.Provider}] {clip.Samples.Length} samples\n  {seen}\n");
+                }
+                catch (Exception e)
+                {
+                    failed++;
+                    Console.WriteLine($"[{c.Provider}] FAILED {e.GetBaseException().Message}\n  {seen}\n");
+                }
+            }
+        }
+        field.SetValue(null, null);
+        return failed;
+    }
+
     static int SupertonicTest(bool keep)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;

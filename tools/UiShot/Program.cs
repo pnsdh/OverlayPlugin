@@ -213,6 +213,10 @@ static class Program
             form.CreateControl();
             CreateHandles(control);
             form.PerformLayout();
+            // What each drop-down holds (drawn ones can look empty in the picture).
+            if (Environment.GetEnvironmentVariable("UISHOT_COMBOS") == "1")
+                foreach (var box in All(control).OfType<ComboBox>())
+                    Console.WriteLine($"  {name} combo: [{box.SelectedIndex}] \"{box.Text}\" ({box.Items.Count} items)");
             var tabs = All(control).OfType<TabControl>().FirstOrDefault();
             if (tabs == null || tabs.TabCount == 0)
             {

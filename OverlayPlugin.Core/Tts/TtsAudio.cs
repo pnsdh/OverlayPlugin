@@ -90,9 +90,16 @@ namespace RainbowMage.OverlayPlugin.Tts
             Client.DefaultRequestHeaders.UserAgent.ParseAdd("OverlayPlugin-TTS/1.0");
         }
 
+        // For tools/TtsBench (set by reflection): answers requests instead of the network, to see
+        // what each service is sent.
+        internal static Func<HttpRequestMessage, byte[]> Intercept;
+
         // The answer's bytes; a failure as an exception with the service's own message.
         public static byte[] Send(HttpRequestMessage request, System.Threading.CancellationToken cancel)
         {
+            var intercept = Intercept;
+            if (intercept != null)
+                return intercept(request);
             // .NET Framework allows 2 connections per host by default: fetching ahead (2 at a time)
             // would make a live alert wait for a free one.
             try

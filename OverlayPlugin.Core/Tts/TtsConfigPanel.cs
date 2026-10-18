@@ -781,9 +781,12 @@ namespace RainbowMage.OverlayPlugin.Tts
             if (field.Kind == TtsFieldKind.Choice)
             {
                 var box = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 380 };
-                box.Items.AddRange(field.Choices.Cast<object>().ToArray());
-                box.SelectedItem = field.Choices.Contains(value) ? value : field.Choices.FirstOrDefault();
-                box.SelectedIndexChanged += (o, e) => Save(box.SelectedItem as string ?? "");
+                var names = (ko ? field.ChoiceNamesKo : field.ChoiceNames) ?? field.ChoiceNames ?? field.Choices;
+                for (int i = 0; i < field.Choices.Length; i++)
+                    box.Items.Add(new Item(i < names.Length ? names[i] : field.Choices[i], field.Choices[i]));
+                int selected = Array.IndexOf(field.Choices, value);
+                box.SelectedIndex = field.Choices.Length == 0 ? -1 : Math.Max(0, selected);
+                box.SelectedIndexChanged += (o, e) => Save((box.SelectedItem as Item)?.Value as string ?? "");
                 input = box;
             }
             else if ((field.Key == "voice" && provider is ITtsVoiceSource) ||

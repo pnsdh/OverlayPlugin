@@ -102,6 +102,9 @@ namespace RainbowMage.OverlayPlugin.Tts
         public TtsFieldKind Kind { get; set; }
         public string Default { get; set; } = "";
         public string[] Choices { get; set; }
+        // Shown for the choices (same order), when the saved values mean little to a reader.
+        public string[] ChoiceNames { get; set; }
+        public string[] ChoiceNamesKo { get; set; }
         // A short hint under the field (e.g. where to get a key).
         public string Hint { get; set; }
         public string HintKo { get; set; }
