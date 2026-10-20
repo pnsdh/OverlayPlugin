@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using RainbowMage.OverlayPlugin.MemoryProcessors.Combatant;
 using RainbowMage.OverlayPlugin.MemoryProcessors.JobGauge;
+using RainbowMage.OverlayPlugin.MemoryProcessors.Party;
 using RainbowMage.OverlayPlugin.MemoryProcessors.Target;
 using PluginCombatant = FFXIV_ACT_Plugin.Common.Models.Combatant;
 
@@ -17,7 +18,7 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors
     // layout it reads it with.  Every few seconds the combatants read from memory are matched (by
     // ID) with FFXIV_ACT_Plugin's, which reads the same memory with its own, separately maintained
     // layout, and each field is compared; the target and the job gauge are checked against the
-    // player.  A field whose offset moved disagrees for (nearly) every combatant; moving ones
+    // player, the party and alliance lists against FFXIV_ACT_Plugin's party types.  A field whose offset moved disagrees for (nearly) every combatant; moving ones
     // disagree a little anyway, the two being read at slightly different moments.  Summaries go to
     // %TEMP%\op-selfcheck.log each minute.  Off unless %TEMP%\op-selfcheck.enable exists when ACT
     // starts.  Right after a patch FFXIV_ACT_Plugin may be the one that is wrong: if both disagree
@@ -116,14 +117,62 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors
             uint playerId = repository.GetPlayerID();
             if (playerId == 0 || !fromPlugin.TryGetValue(playerId, out var player))
                 return;
+            // An event NPC or object targeted (towns, housing) is no combatant: FFXIV_ACT_Plugin gives
+            // an ID found in neither list and the target memory none, which says nothing of the layout.
             var target = container.Resolve<ITargetMemory>();
-            if (target.IsValid())
-                Check("Target (memory) = player's TargetID", Id(target.GetTargetCombatant()?.ID ?? 0), Id(player.TargetID));
+            uint targetId = Id(player.TargetID);
+            if (target.IsValid() && (targetId == 0 || fromPlugin.ContainsKey(targetId)))
+                Check("Target (memory) = player's TargetID", Id(target.GetTargetCombatant()?.ID ?? 0), targetId);
             var gauge = container.Resolve<IJobGaugeMemory>();
             var g = gauge.IsValid() ? gauge.GetJobGauge() : null;
             if (g != null && g.Job != JobGaugeJob.None)
                 Check("JobGauge job = player's job", (int)g.Job, player.Job);
+            CompareParty(fromPlugin);
         }
+
+        // The party and alliance OverlayPlugin reads from memory (cactbot's PartyChanged: roles and
+        // such) against FFXIV_ACT_Plugin's PartyType.  Alone, the memory has no party and
+        // OverlayPlugin makes one of the player, so nothing is compared.
+        private void CompareParty(Dictionary<uint, PluginCombatant> fromPlugin)
+        {
+            var partyMemory = container.Resolve<IPartyMemory>();
+            if (!partyMemory.IsValid())
+                return;
+            var lists = partyMemory.GetPartyLists();
+            if (lists == null || lists.memberCount == 0)
+                return;
+            var party = Members(lists.partyMembers, lists.memberCount);
+            var alliance = new List<PartyListEntry>();
+            foreach (var a in new[] { lists.alliance1Members, lists.alliance2Members, lists.alliance3Members, lists.alliance4Members, lists.alliance5Members })
+                alliance.AddRange(Members(a, int.MaxValue));
+            var pluginParty = new HashSet<uint>(fromPlugin.Values.Where(c => PartyTypeOf(c) == 1).Select(c => c.ID));
+            var pluginAlliance = new HashSet<uint>(fromPlugin.Values.Where(c => PartyTypeOf(c) == 2).Select(c => c.ID));
+            Check("Party members = FFXIV_ACT_Plugin's party", Ids(party), Ids(pluginParty));
+            if (alliance.Count > 0 || pluginAlliance.Count > 0)
+                Check("Alliance members = FFXIV_ACT_Plugin's alliance", Ids(alliance), Ids(pluginAlliance));
+            foreach (var e in party.Concat(alliance))
+            {
+                if (!fromPlugin.TryGetValue(e.objectId, out var p))
+                    continue;
+                Check("Party entry name", e.name, p.Name, hide: true);
+                Check("Party entry job", (int)e.classJob, p.Job);
+                Check("Party entry level", (int)e.level, p.Level);
+                Check("Party entry MaxHP", e.maxHP, p.MaxHP);
+            }
+        }
+
+        private static IEnumerable<PartyListEntry> Members(PartyListEntry[] entries, int count) =>
+            (entries ?? new PartyListEntry[0]).Take(count).Where(e => e != null && Id(e.objectId) != 0);
+
+        private static string Ids(IEnumerable<PartyListEntry> entries) => Ids(entries.Select(e => e.objectId));
+
+        private static string Ids(IEnumerable<uint> ids) => string.Join(",", ids.OrderBy(id => id).Select(id => id.ToString("X8")));
+
+        // Renamed enum in FFXIV_ACT_Plugin 2.6 (see FFXIVRequiredEventSource.GetPartyType): 0 none,
+        // 1 party, 2 alliance.
+        private static readonly System.Reflection.PropertyInfo PartyTypeProperty = typeof(PluginCombatant).GetProperty("PartyType");
+
+        private static int PartyTypeOf(PluginCombatant c) => Convert.ToInt32(PartyTypeProperty.GetValue(c));
 
         private void CompareCombatant(Combatant.Combatant m, PluginCombatant p)
         {
@@ -139,16 +188,22 @@ namespace RainbowMage.OverlayPlugin.MemoryProcessors
             Check("CastBuffID", m.CastBuffID, p.CastBuffID);
             Check("CastTargetID", Id(m.CastTargetID), Id(p.CastTargetID));
             Check("CastDurationMax", m.CastDurationMax, p.CastDurationMax, 0.05f);
+            // Cast flags can change inside the struct with the signature unchanged (7.5 merged two
+            // into one byte; upstream noticed six weeks later, PR #540).
+            Check("IsCasting", m.IsCasting1 != 0, p.IsCasting);
             if (!HpTypes.Contains((byte)m.Type))
                 return;
             Check("Job", (int)m.Job, p.Job);
             Check("Level", (int)m.Level, p.Level);
             Check("CurrentHP", (uint)m.CurrentHP, p.CurrentHP);
             Check("MaxHP", (uint)m.MaxHP, p.MaxHP);
-            Check("MaxMP", (uint)m.MaxMP, p.MaxMP);
             Check("TargetID", Id(m.TargetID), Id(p.TargetID));
             if (m.Type == ObjectType.PC)
             {
+                // Players only: for a monster without MP (a training dummy...) memory has 0 and
+                // FFXIV_ACT_Plugin a default 10000 (as in its 03 lines).
+                Check("MaxMP", (uint)m.MaxMP, p.MaxMP);
+                Check("CurrentMP", (uint)m.CurrentMP, p.CurrentMP);
                 Check("WorldID", (uint)m.WorldID, p.WorldID);
                 Check("CurrentWorldID", (uint)m.CurrentWorldID, p.CurrentWorldID);
             }

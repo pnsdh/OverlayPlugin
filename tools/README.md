@@ -11,11 +11,12 @@
 | [PatchCheck](PatchCheck/README.md) | 게임 패치 대응: OverlayPlugin·cactbot 메모리 시그니처를 새 게임 exe에서 점검(`scan`)하고 다시 만들기(`regen`). ActPluginRepack의 `FFXIV.Signatures` 라이브러리 사용 |
 | `RenderBench/gpu-kill.ps1` | GPU 프로세스를 8번 강제로 꺼도(한컴 업데이터 상황) 버티는지 시험 |
 | `build-install.ps1 -Version <설치본 4자리>` | 빌드 → 릴리즈와 같은 구성으로 묶기 → (ACT가 꺼져 있으면) 설치·해시 대조. `-NoInstall`은 묶기까지만 |
-| `OverlayPlugin.Core/MemoryProcessors/MemorySelfCheck.cs` | 게임 패치 뒤 메모리 구조 자가 점검: 메모리에서 읽은 캐릭터 값을 FFXIV_ACT_Plugin 값과 필드별로 비교 (아래) |
+| `OverlayPlugin.Core/MemoryProcessors/MemorySelfCheck.cs` | 게임 패치 뒤 메모리 구조 자가 점검: 메모리에서 읽은 캐릭터·파티 값을 FFXIV_ACT_Plugin 값과 필드별로 비교 (아래) |
 | `HtmlRenderer/LatencyProbe.cs` | 실제 ACT에서 로그 줄이 오버레이에 닿기까지의 지연 측정 (아래) |
 | `strip-clientstructs.ps1`, `fetch_deps.ps1` 등 | 빌드 준비 (본가) |
 
-cactbot 쪽 도구(오버레이 부하 재생, 효과 비교, 설정 화면 회귀 시험)는 cactbot 포크의 `dev/`에 있습니다.
+cactbot 쪽 도구(오버레이 부하 재생, 효과 비교, 설정 화면 회귀 시험, 패치 뒤 로그 검진)는 cactbot 포크의 `dev/`에 있습니다.
+게임 패치 때 무엇을 어떤 순서로 확인하는지는 아래 [패치 날 순서](#패치-날-순서)에 있습니다.
 
 ## 지연 측정 (LatencyProbe)
 
@@ -35,12 +36,43 @@ cactbot 쪽 도구(오버레이 부하 재생, 효과 비교, 설정 화면 회�
 ## 메모리 구조 자가 점검 (MemorySelfCheck)
 
 평소에는 꺼져 있습니다. ACT를 시작할 때 `%TEMP%\op-selfcheck.enable` 파일이 있으면 켜져, 게임 중 3초마다
-OverlayPlugin이 메모리에서 읽은 캐릭터(이름, 종류, 소유자, 몬스터 ID, 위치, 방향, 시전, 직업, 레벨, HP/MP, 대상, 서버)를
-FFXIV_ACT_Plugin의 값과 ID로 맞춰 비교하고, 대상과 직업 게이지도 플레이어와 맞는지 봅니다.
+OverlayPlugin이 메모리에서 읽은 캐릭터(이름, 종류, 소유자, 몬스터 ID, 위치, 방향, 시전·시전 중 여부, 직업, 레벨, HP, 대상,
+플레이어의 MP·서버)를 FFXIV_ACT_Plugin의 값과 ID로 맞춰 비교하고, 대상과 직업 게이지도 플레이어와 맞는지,
+파티·연합 목록(cactbot의 파티 정보로 가는 것)이 FFXIV_ACT_Plugin의 파티 구분과 같은지(구성원, 직업, 레벨, 최대 HP) 봅니다.
 1분마다 `%TEMP%\op-selfcheck.log`에 필드별로 다른 비율을 남깁니다(`BROKEN?` = 절반 넘게 다름, `odd` = 10% 넘게).
 
 - 오프셋이 밀린 필드는 거의 모든 캐릭터에서 다릅니다. 움직이는 캐릭터의 위치·방향은 두 쪽을 읽는 시점이 달라 조금은 늘 다릅니다.
 - 이름은 값 없이 다름 여부만 남깁니다.
+- 일부러 비교하지 않는 것: 몬스터의 MP(MP 없는 몬스터에 FFXIV_ACT_Plugin은 기본값 10000을 줌), 캐릭터가 아닌 것(마을·하우징의
+  NPC·물건)을 대상으로 잡았을 때의 대상, 혼자일 때의 파티(메모리에 파티가 없음).
+- 게임 중에도 마을보다는 필드·던전에서, 가능하면 파티를 짜서 몇 분 확인하세요.
 - 패치 직후엔 FFXIV_ACT_Plugin 쪽이 틀렸을 수도 있습니다. 값이 그럴듯한 쪽을 보세요.
 - cactbot 플러그인도 같은 파일이 있으면 자기가 읽는 플레이어 정보를 같은 방식으로 비교해 같은 로그에 남깁니다.
 
+## 패치 날 순서
+
+게임 패치가 나오면 ACT를 켜기 전에 이 순서로 확인합니다. 한국·글로벌·중국은 7.5부터 같은 날 같은 버전으로 패치합니다.
+
+1. **FFXIV_ACT_Plugin과 opcode**: ActPluginRepack(`status` → `prepare` → `build` → `install`)으로 FFXIV 플러그인을 고치면
+   OverlayPlugin의 `resources\opcodes.jsonc`도 함께 들어갑니다. 이 포크는 그 파일을 먼저 씁니다(원격 사본은 파일이 없을 때만).
+2. **시그니처**: `dotnet run --project tools\PatchCheck -c Release -- scan` (기본은 한국 클라이언트 exe).
+   - `all signatures in use match once`면 다음 단계로.
+   - `FAIL`이 있으면 `regen --old <패치 전 exe> --new <지금 exe>`. 패치 전 exe는 ActPluginRepack의 `snapshots\<지역>\<버전>\ffxiv_dx11.exe`
+     또는 `fetch-exe`로 받습니다.
+     - `same`/`MOVE`: 패턴은 그대로, `MOVE`면 알려 준 offset·ripOffset만 고칩니다.
+     - `NEW`: 알려 준 소스 파일을 고칩니다. OverlayPlugin은 기존 클래스를 고치지 말고 새 버전 클래스(예: `CombatantMemory80.cs`)를
+       만들어 각 Manager의 후보에 등록하고 `PatchCheck/Signatures.cs` 표에도 넣습니다. cactbot은 `plugin/CactbotEventSource/FFXIVProcessKo.cs` 등
+       지역 파일을 고칩니다.
+     - `!` 줄이 붙은 `NEW`(읽던 변수를 쓰는 다른 함수들로 찾음, 또는 옛 패턴이 다른 변수를 읽음): 그대로 쓰되 4단계에서 게임 중 값으로 꼭 확인합니다.
+     - `FAIL`: 함수째 바뀌었고 대체 경로로도 못 찾은 것입니다. [PatchCheck 예행연습 기록](PatchCheck/README.md#예행연습-기록-2026-10-18)을 참고해 수동으로 찾거나 본가 대응을 기다립니다.
+   - `WARN`(표가 모르는 스캔·새 버전 클래스)이면 표부터 맞춥니다.
+3. **빌드·설치**: OverlayPlugin은 `tools\build-install.ps1 -Version <설치본 4자리>`(ACT가 꺼져 있어야 함). cactbot 플러그인은
+   `msbuild /p:Configuration=Release /p:Platform=x64 plugin/Cactbot.sln`(Visual Studio의 MSBuild, dotnet build는 위성 어셈블리 단계에서 실패).
+4. **구조체**: `%TEMP%\op-selfcheck.enable`을 만들고 ACT를 켜서 필드·던전에서 몇 분(가능하면 파티로) 논 뒤
+   `%TEMP%\op-selfcheck.log`의 `BROKEN?`·`odd`를 봅니다(위 [메모리 구조 자가 점검](#메모리-구조-자가-점검-memoryselfcheck)).
+   구조체 오프셋은 `OverlayPlugin.Core\Thirdparty\FFXIVClientStructs`(본가가 따라가는 ClientStructs)의 새 버전과 비교해 고칩니다.
+5. **패킷 구조**: 전투를 하나 한 뒤 cactbot에서 `node --loader=ts-node/esm dev/patch-health.mjs <그 로그> --baseline <패치 전 로그>`.
+   줄이 안 나오면 opcode, 값이 깨지면 `NetworkProcessors\Line*.cs`의 패킷 구조(지역별로 다를 수 있음, 예: 한국만 초읽기 구조가 달랐던 일)입니다.
+6. **마무리**: `%TEMP%\op-selfcheck.enable`을 지우고, 고친 것은 브랜치·PR로 올려 Fork Release.
+
+화면 요소(AtkStage)는 버전별 고정 주소표라 위 도구로 확인되지 않습니다(PatchCheck README의 "시그니처로 찾지 않는 것").

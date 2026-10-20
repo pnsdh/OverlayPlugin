@@ -16,8 +16,10 @@ using PatchCheck;
 //   64KB blocks the plugins read in.  Judged are the ones in use: the newest version class of each
 //   OverlayPlugin reader, and cactbot's file for the exe's region; older ones are shown for
 //   reference.  Default exe: the Korean client's.
-// PatchCheck regen --old <exe> --new <exe> [--region ...]
+// PatchCheck regen --old <exe> --new <exe> [--region ...] [--only <name part>,...]
 //   Makes the signatures in use again for a new exe from the old one (FFXIV.Signatures' SigRegen).
+//   --only picks signatures by name instead, older version classes too (to rehearse a past patch
+//   with the signatures that were in use before it, e.g. --only EnmityHudMemory70).
 // Common: --cactbot <dir> (default ..\cactbot next to this repo).
 string repo = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
 if (!File.Exists(Path.Combine(repo, "OverlayPlugin.sln")))
@@ -52,7 +54,7 @@ catch (SignatureException e)
 
 int Usage()
 {
-    Console.Error.WriteLine("usage: PatchCheck list [--json <file>] | scan [--exe <exe>] [--region <r>] | regen --old <exe> --new <exe>");
+    Console.Error.WriteLine("usage: PatchCheck list [--json <file>] | scan [--exe <exe>] [--region <r>] | regen --old <exe> --new <exe> [--only <names>]");
     return 1;
 }
 
@@ -113,7 +115,9 @@ int Regen()
     var oldCode = new CodeImage(oldExe);
     var newCode = new CodeImage(newExe);
     int failed = 0;
-    foreach (var s in signatures.Where(s => InUse(s, region)))
+    var only = opts.GetValueOrDefault("only")?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var picked = only != null ? signatures.Where(s => only.Any(o => s.Name.Contains(o, StringComparison.OrdinalIgnoreCase))) : signatures.Where(s => InUse(s, region));
+    foreach (var s in picked)
     {
         var r = SigRegen.Regenerate(oldCode, newCode, SigPattern.HexToPelite(s.Pattern), s.Offset);
         // The pattern can still match while the value is read from elsewhere: a moved field (offset),
@@ -123,6 +127,10 @@ int Regen()
         string moved = (offsetMoved ? $" offset {s.Offset} -> {r.Offset}" : "") + (ripMoved ? $" ripOffset {s.RipOffset} -> {r.RipOffset}" : "");
         // Matches whose call targets could not be compared are said in the detail.
         string unchecked_ = r.CallTargetUnverified ? $"\n     ! call targets not compared: {r.Detail}" : "";
+        // The old pattern still matching but at code reading another variable (judged by the other
+        // functions using it), and patterns found by the variable instead of the same code.
+        string other = r.ReadsOtherGlobal ? "\n     ! the old pattern still matches but reads another variable (judged by the other functions using it)" : "";
+        string anchors = r.GlobalAnchors is int n ? $"\n     ! found by the variable it reads ({n} functions using it agree), not by the same code: check it in game" : "";
         if (r.AlreadyMatches && moved == "")
         {
             Console.WriteLine($"same {s.Name}  ({r.ReadField}){unchecked_}");
@@ -133,12 +141,12 @@ int Regen()
         }
         else if (r.Pattern != null)
         {
-            Console.WriteLine($"NEW  {s.Name}\n     {SigPattern.PeliteToHex(r.Pattern)} offset {r.Offset} ripOffset {r.RipOffset}{(ripMoved ? $"  (ripOffset was {s.RipOffset}: change the reader too)" : "")}  ({r.ReadField})\n     in {s.Source}{unchecked_}");
+            Console.WriteLine($"NEW  {s.Name}\n     {SigPattern.PeliteToHex(r.Pattern)} offset {r.Offset} ripOffset {r.RipOffset}{(ripMoved ? $"  (ripOffset was {s.RipOffset}: change the reader too)" : "")}  ({r.ReadField})\n     in {s.Source}{unchecked_}{other}{anchors}");
         }
         else
         {
             failed++;
-            Console.WriteLine($"FAIL {s.Name}: {r.Detail}");
+            Console.WriteLine($"FAIL {s.Name}: {r.Detail}{other}");
         }
     }
     return failed > 0 ? 2 : 0;
