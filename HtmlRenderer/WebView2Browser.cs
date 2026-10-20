@@ -276,9 +276,14 @@ namespace RainbowMage.HtmlRenderer
         // minutes), so cactbot's delayed alerts and TTS would come up to a second late when the
         // player alt-tabs or a cutscene plays in a fight (measured: 50 ms timers ran once a second,
         // 0.95 s late; with these switches 20 times a second, 13 ms late, while hidden).
+        //
+        // No --allow-file-access-from-files (CEF has none either): with it, any file:// overlay's
+        // script (a user file shared by someone else, in cactbot) could read the computer's files,
+        // e.g. ACT's logs (names, chat) or documents, and send them away.  Overlays load their own
+        // scripts, styles, images and sounds without it.
         private static Task<CoreWebView2Environment> GetEnvironment(bool panels = false)
         {
-            var options = new CoreWebView2EnvironmentOptions("--allow-file-access-from-files --autoplay-policy=no-user-gesture-required" +
+            var options = new CoreWebView2EnvironmentOptions("--autoplay-policy=no-user-gesture-required" +
                 " --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows" +
                 " --disable-features=IntensiveWakeUpThrottling");
             if (panels)
