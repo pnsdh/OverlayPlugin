@@ -1,0 +1,15 @@
+<!doctype html>
+<html style="background: rgb(0 0 150 / 20%); height: 100%; -webkit-app-region: drag">
+<head><meta charset="utf-8"></head>
+<body style="margin: 0">
+<div id="box" style="position: absolute; left: 100px; top: 50px; width: 100px; height: 100px;
+  background: rgb(200 0 0 / 60%); -webkit-app-region: no-drag"></div>
+<script>
+  // What reaches the page: in the box, and on the draggable rest.
+  let moves = 0;
+  for (const type of ['mousedown', 'mouseup'])
+    document.addEventListener(type, (e) => console.log(`${type} on ${e.target.id || e.target.tagName} at ${e.clientX},${e.clientY} (moves ${moves})`));
+  document.addEventListener('mousemove', (e) => { if (e.buttons) moves++; });
+</script>
+</body>
+</html>

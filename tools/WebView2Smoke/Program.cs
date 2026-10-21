@@ -63,6 +63,7 @@ static class Program
         if (Environment.GetEnvironmentVariable("SMOKE_WHEEL") == "1") { var t8 = new Timer { Interval = 3000 }; t8.Tick += (s9, e9) => { t8.Stop(); form.IsClickThru = false; Wheel.Run(form); }; t8.Start(); }
         if (Environment.GetEnvironmentVariable("SMOKE_KEYS") == "1") { var t6 = new Timer { Interval = 3000 }; t6.Tick += (s7, e7) => { t6.Stop(); form.IsClickThru = false; Keys2.Run(form); }; t6.Start(); }
         if (Environment.GetEnvironmentVariable("SMOKE_HITLOOP") == "1") { var t4 = new Timer { Interval = 4000 }; t4.Tick += (s5, e5) => { t4.Stop(); form.IsClickThru = false; HitLoop.Run(form); }; t4.Start(); }
+        if (Environment.GetEnvironmentVariable("SMOKE_REGION") == "1") { var t22 = new Timer { Interval = 3000 }; t22.Tick += (s23, e23) => { t22.Stop(); form.IsClickThru = false; Region.Run(form); }; t22.Start(); }
         if (Environment.GetEnvironmentVariable("SMOKE_RESIZE") == "1") { var t20 = new Timer { Interval = 3000 }; t20.Tick += (s21, e21) => { t20.Stop(); form.IsClickThru = false; Resize.Run(form); }; t20.Start(); }
         if (Environment.GetEnvironmentVariable("SMOKE_PHASE2") == "1") { var t2 = new Timer { Interval = 3000 }; t2.Tick += (s3, e3) => { t2.Stop(); form.IsClickThru = false; Phase2.Run(form); }; t2.Start(); }
         var probe = Environment.GetEnvironmentVariable("SMOKE_SCRIPT");
