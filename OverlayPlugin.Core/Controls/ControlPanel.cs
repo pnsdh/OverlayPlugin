@@ -79,7 +79,10 @@ namespace RainbowMage.OverlayPlugin
             buttonToggleLog.MinimumSize = buttonClearLog.Size;
             buttonToggleLog.Margin = buttonClearLog.Margin;
             buttonToggleLog.Click += (o, e) => SetLogHidden(!splitContainer1.Panel2Collapsed);
+            // Before the log's own buttons: on a narrow window, the row's last ones wrap out of
+            // sight, and this one must stay (the log can't be shown again without it).
             flowLayoutPanel.Controls.Add(buttonToggleLog);
+            flowLayoutPanel.Controls.SetChildIndex(buttonToggleLog, flowLayoutPanel.Controls.IndexOf(checkBoxFollowLog));
             SetLogHidden(container.Resolve<PluginConfig>().HideLog);
 
             if (container.CanResolve<Tts.TtsService>(ResolveOptions.FailUnregisteredOnly))
@@ -143,7 +146,10 @@ namespace RainbowMage.OverlayPlugin
             buttonToggleLog.Text = !hidden ? T("Hide log", "로그 숨기기")
                 : hiddenLogProblems > 0 ? T($"Show log ({hiddenLogProblems} warnings or errors)", $"로그 보기 (경고·오류 {hiddenLogProblems})")
                 : T("Show log", "로그 보기");
-            buttonToggleLog.ForeColor = hidden && hiddenLogProblems > 0 ? Color.Firebrick : SystemColors.ControlText;
+            if (hidden && hiddenLogProblems > 0)
+                buttonToggleLog.ForeColor = Color.Firebrick;
+            else
+                buttonToggleLog.ResetForeColor();
         }
 
         public void ResizeLog()

@@ -225,6 +225,25 @@ static class Program
                 .Invoke(panel, null);
             return panel;
         });
+        // Started hidden, then shown again once laid out (as on the button in ACT): the log back at
+        // its size, as in ControlPanel.
+        Shoot("ControlPanel-log-shown-again", () =>
+        {
+            var panel = panelOf(true);
+            using (var host = new Form { ClientSize = panel.Size })
+            {
+                host.Controls.Add(panel);
+                host.CreateControl();
+                panel.PerformLayout();
+                typeof(ControlPanel).GetMethod("SetLogHidden", BindingFlags.NonPublic | BindingFlags.Instance)
+                    .Invoke(panel, new object[] { false });
+                panel.PerformLayout();
+                host.Controls.Remove(panel);
+            }
+            var split = (SplitContainer)typeof(ControlPanel).GetField("splitContainer1", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(panel);
+            Console.WriteLine($"log shown again: log {split.Panel2.Height}px of {split.Height}px, collapsed {split.Panel2Collapsed}");
+            return panel;
+        });
         // Its general page (the general and event settings as tabs), which the whole panel's
         // picture leaves blank (tabs in a tab).
         Shoot("ControlPanel-general", () =>
