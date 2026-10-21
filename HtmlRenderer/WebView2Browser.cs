@@ -179,13 +179,17 @@ namespace RainbowMage.HtmlRenderer
                 var core = controller.CoreWebView2;
                 core.Settings.IsStatusBarEnabled = false;
                 core.Settings.IsZoomControlEnabled = false;
+                core.Settings.IsNonClientRegionSupportEnabled = true;
                 core.IsMuted = muted;
                 core.ContentLoading += OnContentLoading;
+                // A new page has no regions until it says so.
+                core.ContentLoading += (s, e) => SetDraggableRegion(null);
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.WebMessageReceived += OnWebMessageReceived;
                 core.ContextMenuRequested += OnContextMenuRequested;
                 core.ProcessFailed += OnProcessFailed;
                 created.CursorChanged += OnCursorChanged;
+                created.NonClientRegionChanged += OnNonClientRegionChanged;
                 apiScriptAdded = api != null;
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(ApiScript());
                 await core.AddScriptToExecuteOnDocumentCreatedAsync(TypingScript);
@@ -751,6 +755,38 @@ namespace RainbowMage.HtmlRenderer
             catch (Exception)
             {
             }
+        }
+
+        // Fork: the page's draggable regions (CSS app-region), as CEF gives them to DragHandler: an
+        // unlocked overlay then moves only from there, so the page can take drags elsewhere (e.g.
+        // oopsy's width handle).  A page without any moves from anywhere.
+        private void OnNonClientRegionChanged(object sender, CoreWebView2NonClientRegionChangedEventArgs e)
+        {
+            try
+            {
+                if (e.RegionKind != CoreWebView2NonClientRegionKind.Caption) return;
+                var rects = Composition?.QueryNonClientRegion(CoreWebView2NonClientRegionKind.Caption);
+                Region region = null;
+                if (rects != null && rects.Count > 0)
+                {
+                    region = new Region();
+                    region.MakeEmpty();
+                    foreach (var rect in rects)
+                        region.Union(rect);
+                }
+                SetDraggableRegion(region);
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        // On the UI thread, as the mouse handlers that read it: the old region can go at once.
+        private void SetDraggableRegion(Region region)
+        {
+            var old = owner.DraggableRegion;
+            owner.DraggableRegion = region;
+            old?.Dispose();
         }
 
         // WebView2 reads keys from a window it puts in the overlay's window.  Keys that reach the
