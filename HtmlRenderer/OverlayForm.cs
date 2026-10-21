@@ -258,18 +258,16 @@ namespace RainbowMage.HtmlRenderer
             base.WndProc(ref m);
 
             const int WM_NCHITTEST = 0x84;
-            const int HTBOTTOMRIGHT = 17;
-
-            const int gripSize = 16;
 
             if (m.Msg == WM_NCHITTEST && !this.Locked)
             {
-                var posisiton = new Point(m.LParam.ToInt32() & 0xFFFF, m.LParam.ToInt32() >> 16);
-                posisiton = this.PointToClient(posisiton);
-                if (posisiton.X >= this.ClientSize.Width - gripSize &&
-                    posisiton.Y >= this.ClientSize.Height - gripSize)
+                // Signed: a monitor left of or above the main one has negative coordinates.
+                var lParam = m.LParam.ToInt64();
+                var position = this.PointToClient(new Point((short)(lParam & 0xFFFF), (short)((lParam >> 16) & 0xFFFF)));
+                var hit = ResizeHitTest(position, this.ClientSize);
+                if (hit != 0)
                 {
-                    m.Result = (IntPtr)HTBOTTOMRIGHT;
+                    m.Result = (IntPtr)hit;
                     return;
                 }
             }
@@ -283,6 +281,40 @@ namespace RainbowMage.HtmlRenderer
             {
                 Renderer.OnKeyEvent(ref m);
             }
+        }
+
+        // Fork: an unlocked overlay resizes from any edge or corner, as a window does, not only from
+        // its bottom right corner (where pages tend to cover their grip image, e.g. cactbot's).
+        // The rest still moves it.  0 where it doesn't resize.
+        private static int ResizeHitTest(Point p, System.Drawing.Size size)
+        {
+            const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13, HTTOPRIGHT = 14;
+            const int HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
+            // The edge's width, and how far along it from a corner it resizes both ways.
+            const int edge = 8;
+            const int corner = 16;
+
+            // The whole corner square, as before.
+            if (p.X >= size.Width - corner && p.Y >= size.Height - corner)
+                return HTBOTTOMRIGHT;
+
+            var left = p.X < edge;
+            var right = p.X >= size.Width - edge;
+            var top = p.Y < edge;
+            var bottom = p.Y >= size.Height - edge;
+            var nearLeft = p.X < corner;
+            var nearRight = p.X >= size.Width - corner;
+            var nearTop = p.Y < corner;
+            var nearBottom = p.Y >= size.Height - corner;
+
+            if ((top && nearLeft) || (left && nearTop)) return HTTOPLEFT;
+            if ((top && nearRight) || (right && nearTop)) return HTTOPRIGHT;
+            if ((bottom && nearLeft) || (left && nearBottom)) return HTBOTTOMLEFT;
+            if (left) return HTLEFT;
+            if (right) return HTRIGHT;
+            if (top) return HTTOP;
+            if (bottom) return HTBOTTOM;
+            return 0;
         }
 
         private void UpdateLayeredWindowBitmap()
