@@ -102,6 +102,21 @@ namespace RainbowMage.OverlayPlugin
             }
         }
 
+        // Fork: the log under the settings hidden (see ControlPanel), for more room.
+        private bool _hideLog;
+        public bool HideLog
+        {
+            get
+            {
+                return _hideLog;
+            }
+            set
+            {
+                _hideLog = value;
+                isDirty = true;
+            }
+        }
+
         private bool _errorReports;
         public bool ErrorReports
         {

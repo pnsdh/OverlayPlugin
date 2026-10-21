@@ -24,9 +24,15 @@ namespace RainbowMage.OverlayPlugin
         PluginMain _pluginMain;
         IPluginConfig _config;
         Registry _registry;
-        TabPage _generalTab, _eventTab;
+        TabPage _generalTab;
+        // Fork: the general settings, in a tab of _generalTab with the event settings.
+        GeneralConfigTab _generalConfig;
         // Fork: the plugin's own TTS (see Tts.TtsService), when it started.
         TabPage _ttsTab;
+        // Fork: shows or hides the log (more room for the settings, e.g. cactbot's timeline
+        // editor); while it is hidden, the warnings and errors that come are counted on it.
+        readonly Button buttonToggleLog = new Button { AutoSize = true, UseVisualStyleBackColor = true };
+        int hiddenLogProblems = 0;
         bool logResized = false;
         bool logConnected = false;
 
@@ -57,19 +63,24 @@ namespace RainbowMage.OverlayPlugin
 
             this.checkBoxFollowLog.Checked = _config.FollowLatestLog;
 
+            // Fork: the general and the event settings, both short, as tabs of one page (as the
+            // TTS settings are), instead of two in the list.
+            _generalConfig = new GeneralConfigTab(container);
+            var generalTabs = new TabControl { Dock = DockStyle.Fill };
+            generalTabs.TabPages.Add(SubTab(T("Basic", "기본"), _generalConfig));
+            generalTabs.TabPages.Add(SubTab(Resources.EventConfigTab, new EventSources.BuiltinEventConfigPanel(container)));
             _generalTab = new ConfigTabPage
             {
                 Name = Resources.GeneralTab,
                 Text = "",
             };
-            _generalTab.Controls.Add(new GeneralConfigTab(container));
+            _generalTab.Controls.Add(generalTabs);
 
-            _eventTab = new ConfigTabPage
-            {
-                Name = Resources.EventConfigTab,
-                Text = "",
-            };
-            _eventTab.Controls.Add(new EventSources.BuiltinEventConfigPanel(container));
+            buttonToggleLog.MinimumSize = buttonClearLog.Size;
+            buttonToggleLog.Margin = buttonClearLog.Margin;
+            buttonToggleLog.Click += (o, e) => SetLogHidden(!splitContainer1.Panel2Collapsed);
+            flowLayoutPanel.Controls.Add(buttonToggleLog);
+            SetLogHidden(container.Resolve<PluginConfig>().HideLog);
 
             if (container.CanResolve<Tts.TtsService>(ResolveOptions.FailUnregisteredOnly))
             {
@@ -103,6 +114,38 @@ namespace RainbowMage.OverlayPlugin
             };
         }
 
+        private static string T(string en, string ko) =>
+            CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ko" ? ko : en;
+
+        private static TabPage SubTab(string title, Control content)
+        {
+            var page = new TabPage { Text = title, UseVisualStyleBackColor = true };
+            content.Dock = DockStyle.Fill;
+            page.Controls.Add(content);
+            return page;
+        }
+
+        // Fork: see buttonToggleLog.  The buttons only for the log go with it.
+        private void SetLogHidden(bool hidden)
+        {
+            splitContainer1.Panel2Collapsed = hidden;
+            checkBoxFollowLog.Visible = !hidden;
+            buttonClearLog.Visible = !hidden;
+            if (!hidden)
+                hiddenLogProblems = 0;
+            _container.Resolve<PluginConfig>().HideLog = hidden;
+            UpdateToggleLog();
+        }
+
+        private void UpdateToggleLog()
+        {
+            bool hidden = splitContainer1.Panel2Collapsed;
+            buttonToggleLog.Text = !hidden ? T("Hide log", "로그 숨기기")
+                : hiddenLogProblems > 0 ? T($"Show log ({hiddenLogProblems} warnings or errors)", $"로그 보기 (경고·오류 {hiddenLogProblems})")
+                : T("Show log", "로그 보기");
+            buttonToggleLog.ForeColor = hidden && hiddenLogProblems > 0 ? Color.Firebrick : SystemColors.ControlText;
+        }
+
         public void ResizeLog()
         {
             if (!logResized)
@@ -121,7 +164,6 @@ namespace RainbowMage.OverlayPlugin
             {
                 components?.Dispose();
                 _generalTab?.Dispose();
-                _eventTab?.Dispose();
                 _ttsTab?.Dispose();
                 _registry.EventSourceRegistered -= AddEventSourceTab;
                 _logger.ClearListener();
@@ -135,6 +177,13 @@ namespace RainbowMage.OverlayPlugin
             Action appendText = () =>
             {
                 var msg = $"[{entry.Time}] {entry.Level}: {entry.Message}" + Environment.NewLine;
+
+                // Fork: counted on the button while the log is hidden (see buttonToggleLog).
+                if (splitContainer1.Panel2Collapsed && entry.Level >= LogLevel.Warning)
+                {
+                    hiddenLogProblems++;
+                    UpdateToggleLog();
+                }
 
                 if (!logConnected)
                 {
@@ -210,7 +259,6 @@ namespace RainbowMage.OverlayPlugin
         {
             tabControl.TabPages.Clear();
             tabControl.TabPages.Add(_generalTab);
-            tabControl.TabPages.Add(_eventTab);
             if (_ttsTab != null)
                 tabControl.TabPages.Add(_ttsTab);
 
@@ -226,11 +274,11 @@ namespace RainbowMage.OverlayPlugin
 
             if (_pluginMain.Overlays.Count == 0)
             {
-                ((GeneralConfigTab)_generalTab.Controls[0]).SetReadmeVisible(true);
+                _generalConfig.SetReadmeVisible(true);
             }
             else
             {
-                ((GeneralConfigTab)_generalTab.Controls[0]).SetReadmeVisible(false);
+                _generalConfig.SetReadmeVisible(false);
             }
         }
 
@@ -255,7 +303,7 @@ namespace RainbowMage.OverlayPlugin
                 tabPage.Controls.Add(control);
 
                 this.tabControl.TabPages.Add(tabPage);
-                ((GeneralConfigTab)_generalTab.Controls[0]).SetReadmeVisible(false);
+                _generalConfig.SetReadmeVisible(false);
             }
         }
 
@@ -391,7 +439,7 @@ namespace RainbowMage.OverlayPlugin
             this.tabControl.Update();
             if (_pluginMain.Overlays.Count == 0)
             {
-                ((GeneralConfigTab)_generalTab.Controls[0]).SetReadmeVisible(true);
+                _generalConfig.SetReadmeVisible(true);
             }
         }
 

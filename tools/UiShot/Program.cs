@@ -104,6 +104,8 @@ static class Program
         container.Register<ILogger>(new Logger());
         var main = Stub<PluginMain>();
         SetProperty(main, "PluginDirectory", libs);
+        // No overlays (the whole ControlPanel lists them).
+        SetProperty(main, "Overlays", new System.Collections.Generic.List<IOverlay>());
         container.Register(main);
         var config = new PluginConfig(Path.Combine(Path.GetTempPath(), "uishot-nonexistent.json"), container);
         container.Register(config);
@@ -200,7 +202,40 @@ static class Program
             started?.Invoke(registry, EventArgs.Empty);
             return panel;
         });
-        Shoot("ControlPanel", () => new ControlPanel(container));
+        // The whole panel as ACT shows it once loaded: its tabs, the log at its size (or hidden).
+        Func<bool, ControlPanel> panelOf = (hideLog) =>
+        {
+            config.HideLog = hideLog;
+            var panel = new ControlPanel(container) { Size = new System.Drawing.Size(width, height) };
+            panel.InitializeOverlayConfigTabs();
+            panel.ResizeLog();
+            config.HideLog = false;
+            return panel;
+        };
+        Shoot("ControlPanel", () => panelOf(false));
+        Shoot("ControlPanel-log-hidden", () => panelOf(true));
+        // Hidden, with two warnings or errors logged since, as counted on its button (logging itself
+        // needs ACT's window, which is only a stand-in here).
+        Shoot("ControlPanel-log-hidden-errors", () =>
+        {
+            var panel = panelOf(true);
+            typeof(ControlPanel).GetField("hiddenLogProblems", BindingFlags.NonPublic | BindingFlags.Instance)
+                .SetValue(panel, 2);
+            typeof(ControlPanel).GetMethod("UpdateToggleLog", BindingFlags.NonPublic | BindingFlags.Instance)
+                .Invoke(panel, null);
+            return panel;
+        });
+        // Its general page (the general and event settings as tabs), which the whole panel's
+        // picture leaves blank (tabs in a tab).
+        Shoot("ControlPanel-general", () =>
+        {
+            var page = (TabPage)typeof(ControlPanel)
+                .GetField("_generalTab", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(panelOf(false));
+            var tabs = page.Controls[0];
+            page.Controls.Remove(tabs);
+            return tabs;
+        });
         try { ShootDialog(outDir, $"NewOverlayDialog.{culture}", new NewOverlayDialog(container)); }
         catch (Exception e) { failed++; Console.WriteLine($"NewOverlayDialog: {e.GetBaseException().Message}"); }
         try { ShootDialog(outDir, $"RenameOverlayDialog.{culture}", new RenameOverlayDialog("Raidboss : Timeline")); }
