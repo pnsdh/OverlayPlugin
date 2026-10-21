@@ -104,6 +104,8 @@ static class Program
         container.Register<ILogger>(new Logger());
         var main = Stub<PluginMain>();
         SetProperty(main, "PluginDirectory", libs);
+        // No overlays (the whole ControlPanel lists them).
+        SetProperty(main, "Overlays", new System.Collections.Generic.List<IOverlay>());
         container.Register(main);
         var config = new PluginConfig(Path.Combine(Path.GetTempPath(), "uishot-nonexistent.json"), container);
         container.Register(config);
@@ -200,7 +202,86 @@ static class Program
             started?.Invoke(registry, EventArgs.Empty);
             return panel;
         });
-        Shoot("ControlPanel", () => new ControlPanel(container));
+        // The whole panel as ACT shows it once loaded: its tabs, the log at its size (or hidden).
+        Func<bool, ControlPanel> panelOf = (hideLog) =>
+        {
+            config.HideLog = hideLog;
+            var panel = new ControlPanel(container) { Size = new System.Drawing.Size(width, height) };
+            panel.InitializeOverlayConfigTabs();
+            panel.ResizeLog();
+            config.HideLog = false;
+            return panel;
+        };
+        Shoot("ControlPanel", () => panelOf(false));
+        Shoot("ControlPanel-log-hidden", () => panelOf(true));
+        // Hidden, with two warnings or errors logged since, as counted on its button (logging itself
+        // needs ACT's window, which is only a stand-in here).
+        Shoot("ControlPanel-log-hidden-errors", () =>
+        {
+            var panel = panelOf(true);
+            typeof(ControlPanel).GetField("hiddenLogProblems", BindingFlags.NonPublic | BindingFlags.Instance)
+                .SetValue(panel, 2);
+            typeof(ControlPanel).GetMethod("UpdateToggleLog", BindingFlags.NonPublic | BindingFlags.Instance)
+                .Invoke(panel, null);
+            return panel;
+        });
+        // Started hidden, then shown again once laid out (as on the button in ACT): the log back at
+        // its size, as in ControlPanel.
+        Shoot("ControlPanel-log-shown-again", () =>
+        {
+            var panel = panelOf(true);
+            using (var host = new Form { ClientSize = panel.Size, Opacity = 0, ShowInTaskbar = false })
+            {
+                host.Controls.Add(panel);
+                // Shown (see through), so its handles and layout are real.
+                host.Show();
+                panel.PerformLayout();
+                typeof(ControlPanel).GetMethod("SetLogHidden", BindingFlags.NonPublic | BindingFlags.Instance)
+                    .Invoke(panel, new object[] { false });
+                panel.PerformLayout();
+                host.Controls.Remove(panel);
+            }
+            var split = (SplitContainer)typeof(ControlPanel).GetField("splitContainer1", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(panel);
+            Console.WriteLine($"log shown again: log {split.Panel2.Height}px of {split.Height}px, collapsed {split.Panel2Collapsed}");
+            return panel;
+        });
+        // Its general page (the general and event settings as tabs), which the whole panel's
+        // picture leaves blank (tabs in a tab).
+        Shoot("ControlPanel-general", () =>
+        {
+            var page = (TabPage)typeof(ControlPanel)
+                .GetField("_generalTab", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(panelOf(false));
+            var tabs = page.Controls[0];
+            page.Controls.Remove(tabs);
+            return tabs;
+        });
+        // The same in a short window (the log shown): its pages scroll.
+        Shoot("ControlPanel-general-short", () =>
+        {
+            var page = (TabPage)typeof(ControlPanel)
+                .GetField("_generalTab", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(panelOf(false));
+            var tabs = (TabControl)page.Controls[0];
+            page.Controls.Remove(tabs);
+            tabs.Dock = DockStyle.None;
+            tabs.Size = new System.Drawing.Size(width, 260);
+            using (var host = new Form { ClientSize = tabs.Size, Opacity = 0, ShowInTaskbar = false })
+            {
+                host.Controls.Add(tabs);
+                // Shown (see through), so its handles and layout are real.
+                host.Show();
+                foreach (TabPage sub in tabs.TabPages)
+                {
+                    tabs.SelectedTab = sub;
+                    sub.PerformLayout();
+                    Console.WriteLine($"short general page {sub.Text}: scrolls {sub.VerticalScroll.Visible}");
+                }
+                tabs.SelectedIndex = 0;
+                host.Controls.Remove(tabs);
+            }
+            return tabs;
+        });
         try { ShootDialog(outDir, $"NewOverlayDialog.{culture}", new NewOverlayDialog(container)); }
         catch (Exception e) { failed++; Console.WriteLine($"NewOverlayDialog: {e.GetBaseException().Message}"); }
         try { ShootDialog(outDir, $"RenameOverlayDialog.{culture}", new RenameOverlayDialog("Raidboss : Timeline")); }
