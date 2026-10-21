@@ -28,6 +28,7 @@ bin\Release\net48\WebView2Smoke.exe <페이지 URL> <로그 파일>
 | 환경 변수 | 시험 |
 | --- | --- |
 | `SMOKE_APPDATA` | WebView2·CEF 데이터 폴더 (실제 ACT 폴더와 섞이지 않게 꼭 따로 지정) |
+| `SMOKE_CEF=1` | 오버레이를 WebView2 대신 CEF로 (본가 OverlayPlugin처럼). `SMOKE_CEFCACHE`로 CEF 캐시도 따로 |
 | `SMOKE_PHASE2=1` | 클릭 통과 판정(투명한 곳은 통과), 더블클릭, 커서, 스크린샷 |
 | `SMOKE_HITLOOP=1` | 커서를 올려 둔 동안의 판정 비용 |
 | `SMOKE_EDGE=<배율>` | 소수 배율 확대에서 창 가장자리의 판정 |

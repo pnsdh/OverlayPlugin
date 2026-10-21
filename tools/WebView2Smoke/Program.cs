@@ -39,7 +39,11 @@ static class Program
         var appData = Environment.GetEnvironmentVariable("SMOKE_APPDATA") ?? Path.GetTempPath();
         Renderer.InitializeWebView2(Program.PluginDir, appData);
         Log("available=" + Renderer.WebView2Available + " status=" + Renderer.WebView2Status);
-        OverlayForm form = new OverlayForm("smoke", "uuid-1", args[0], 60, new TestApi(), true);
+        // SMOKE_CEF=1: the overlay on CEF instead, as without WebView2 (upstream OverlayPlugin).
+        var cef = Environment.GetEnvironmentVariable("SMOKE_CEF") == "1";
+        if (cef)
+            Renderer.Initialize(Program.PluginDir, appData, false, false);
+        OverlayForm form = new OverlayForm("smoke", "uuid-1", args[0], 60, new TestApi(), !cef);
         Log("UsesWebView2=" + form.Renderer.UsesWebView2);
         form.Renderer.BrowserConsoleLog += (s, e) => Log("console: " + e.Message + " @" + e.Source + ":" + e.Line);
         form.Renderer.BrowserLoad += (s, e) => Log("load: " + e.HttpStatusCode + " " + e.Url);
