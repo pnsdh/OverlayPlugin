@@ -31,6 +31,7 @@ bin\Release\net48\WebView2Smoke.exe <페이지 URL> <로그 파일>
 | `SMOKE_PHASE2=1` | 클릭 통과 판정(투명한 곳은 통과), 더블클릭, 커서, 스크린샷 |
 | `SMOKE_HITLOOP=1` | 커서를 올려 둔 동안의 판정 비용 |
 | `SMOKE_EDGE=<배율>` | 소수 배율 확대에서 창 가장자리의 판정 |
+| `SMOKE_RESIZE=1` | 잠금 푼 창의 테두리 크기 조절(`resize.html`): 가장자리 판정, 음수 좌표, 실제 끌기(마우스가 움직임) |
 | `SMOKE_WHEEL=1` | 마우스 휠(세로, Shift+가로) |
 | `SMOKE_KEYS=1` | 입력칸 키보드 입력 |
 | `SMOKE_IME=1` (`SMOKE_IME_BS`) | 한글 조합이 포커스를 잃을 때 유지되는지 |
