@@ -4,7 +4,7 @@
 {
     "Chinese": {
         "2026.10.06.0000.0000": {
-            // Version: 7.57 (ActPluginRepack: Yarukon CN_2026.10.06)
+            // Version: 7.57
             "MapEffect": {
                 "opcode": 422,
                 "size": 11
@@ -57,7 +57,7 @@
     },
     "Global": {
         "2026.10.16.0000.0000": {
-            // Version: 7.57h (ActPluginRepack: karashiiro Global 7.57h)
+            // Version: 7.57h
             "MapEffect": {
                 "opcode": 510,
                 "size": 11
@@ -110,7 +110,7 @@
     },
     "Korean": {
         "2026.10.06.0000.0000": {
-            // Version: 7.57 (ActPluginRepack: Yarukon CN_2026.10.06)
+            // Version: 7.57
             "MapEffect": {
                 "opcode": 422,
                 "size": 11
