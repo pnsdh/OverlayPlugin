@@ -122,7 +122,15 @@ namespace RainbowMage.OverlayPlugin
 
         private static TabPage SubTab(string title, Control content)
         {
-            var page = new TabPage { Text = title, UseVisualStyleBackColor = true };
+            // Scrolls when shorter than its content as designed (a short window, the log shown),
+            // as the TTS settings' pages do.
+            var page = new TabPage
+            {
+                Text = title,
+                UseVisualStyleBackColor = true,
+                AutoScroll = true,
+                AutoScrollMinSize = new Size(0, content.Height),
+            };
             content.Dock = DockStyle.Fill;
             page.Controls.Add(content);
             return page;

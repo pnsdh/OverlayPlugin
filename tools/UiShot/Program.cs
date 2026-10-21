@@ -255,6 +255,31 @@ static class Program
             page.Controls.Remove(tabs);
             return tabs;
         });
+        // The same in a short window (the log shown): its pages scroll.
+        Shoot("ControlPanel-general-short", () =>
+        {
+            var page = (TabPage)typeof(ControlPanel)
+                .GetField("_generalTab", BindingFlags.NonPublic | BindingFlags.Instance)
+                .GetValue(panelOf(false));
+            var tabs = (TabControl)page.Controls[0];
+            page.Controls.Remove(tabs);
+            tabs.Dock = DockStyle.None;
+            tabs.Size = new System.Drawing.Size(width, 260);
+            using (var host = new Form { ClientSize = tabs.Size })
+            {
+                host.Controls.Add(tabs);
+                host.CreateControl();
+                foreach (TabPage sub in tabs.TabPages)
+                {
+                    tabs.SelectedTab = sub;
+                    sub.PerformLayout();
+                    Console.WriteLine($"short general page {sub.Text}: scrolls {sub.VerticalScroll.Visible}");
+                }
+                tabs.SelectedIndex = 0;
+                host.Controls.Remove(tabs);
+            }
+            return tabs;
+        });
         try { ShootDialog(outDir, $"NewOverlayDialog.{culture}", new NewOverlayDialog(container)); }
         catch (Exception e) { failed++; Console.WriteLine($"NewOverlayDialog: {e.GetBaseException().Message}"); }
         try { ShootDialog(outDir, $"RenameOverlayDialog.{culture}", new RenameOverlayDialog("Raidboss : Timeline")); }
