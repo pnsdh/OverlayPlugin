@@ -183,7 +183,7 @@ namespace RainbowMage.HtmlRenderer
                 core.IsMuted = muted;
                 core.ContentLoading += OnContentLoading;
                 // A new page has no regions until it says so.
-                core.ContentLoading += (s, e) => owner.DraggableRegion = null;
+                core.ContentLoading += (s, e) => SetDraggableRegion(null);
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.WebMessageReceived += OnWebMessageReceived;
                 core.ContextMenuRequested += OnContextMenuRequested;
@@ -774,11 +774,19 @@ namespace RainbowMage.HtmlRenderer
                     foreach (var rect in rects)
                         region.Union(rect);
                 }
-                owner.DraggableRegion = region;
+                SetDraggableRegion(region);
             }
             catch (Exception)
             {
             }
+        }
+
+        // On the UI thread, as the mouse handlers that read it: the old region can go at once.
+        private void SetDraggableRegion(Region region)
+        {
+            var old = owner.DraggableRegion;
+            owner.DraggableRegion = region;
+            old?.Dispose();
         }
 
         // WebView2 reads keys from a window it puts in the overlay's window.  Keys that reach the
