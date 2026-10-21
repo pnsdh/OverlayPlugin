@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using RainbowMage.OverlayPlugin.MemoryProcessors.Combatant;
@@ -219,6 +220,19 @@ namespace RainbowMage.OverlayPlugin
 
             return null;
         }
+        // Fork: see the indexer.
+        private bool IsAnotherRegionsVersion(MachinaRegion region, string version)
+        {
+            if (region == repository.GetMachinaRegion().ToString())
+                return false;
+            bool Has(Opcodes opcodes, MachinaRegion r) =>
+                opcodes != null && opcodes.TryGetValue(r, out var byVersion) && byVersion.ContainsKey(version);
+            bool Elsewhere(Opcodes opcodes) =>
+                opcodes != null && opcodes.Keys.Any(r => r != region && Has(opcodes, r));
+            return !Has(opcodesFile, region) && !Has(opcodesConfig, region) &&
+                (Elsewhere(opcodesFile) || Elsewhere(opcodesConfig));
+        }
+
         // Fork: where this game version's opcodes come from, for the tech support info: the file
         // (how many names), the remote copy cached in the config, or nowhere.
         public string DescribeSource(MachinaRegion region, string version)
@@ -276,6 +290,13 @@ namespace RainbowMage.OverlayPlugin
                         return null;
                     }
                 }
+
+                // Fork: nothing to find (log, or fetch) for another region than the game's when the
+                // game's version is a version of another region's only: the packet helpers ask every
+                // region with the one game version, and they differ at times (Global has patches of
+                // its own).  A version no region has (a new patch) is looked for as before.
+                if (IsAnotherRegionsVersion(machinaRegion, version))
+                    return null;
 
                 // Fork: the file first.  It is what a release ships or what a local patch tool put
                 // there for a new game version; a remote copy is only fetched (and cached until the
