@@ -230,10 +230,11 @@ static class Program
         Shoot("ControlPanel-log-shown-again", () =>
         {
             var panel = panelOf(true);
-            using (var host = new Form { ClientSize = panel.Size })
+            using (var host = new Form { ClientSize = panel.Size, Opacity = 0, ShowInTaskbar = false })
             {
                 host.Controls.Add(panel);
-                host.CreateControl();
+                // Shown (see through), so its handles and layout are real.
+                host.Show();
                 panel.PerformLayout();
                 typeof(ControlPanel).GetMethod("SetLogHidden", BindingFlags.NonPublic | BindingFlags.Instance)
                     .Invoke(panel, new object[] { false });
@@ -265,10 +266,11 @@ static class Program
             page.Controls.Remove(tabs);
             tabs.Dock = DockStyle.None;
             tabs.Size = new System.Drawing.Size(width, 260);
-            using (var host = new Form { ClientSize = tabs.Size })
+            using (var host = new Form { ClientSize = tabs.Size, Opacity = 0, ShowInTaskbar = false })
             {
                 host.Controls.Add(tabs);
-                host.CreateControl();
+                // Shown (see through), so its handles and layout are real.
+                host.Show();
                 foreach (TabPage sub in tabs.TabPages)
                 {
                     tabs.SelectedTab = sub;
